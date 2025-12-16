@@ -98,6 +98,17 @@ export const translations = {
     'agent.llmConfigSet': 'LLM配置已设置',
     'agent.llmConfigReloaded': 'LLM配置已重新加载',
 
+    // 提示词
+    'prompt.addNew': '新增提示词',
+    'prompt.system': '系统',
+    'prompt.custom': '自定义',
+
+    // Dashboard
+    'dashboard.welcome': '欢迎使用',
+    'dashboard.quickActions': '快速操作',
+    'dashboard.recentScripts': '最近的脚本',
+    'dashboard.stats': '统计信息',
+
     // 导航
     'nav.browser': '浏览器',
     'nav.scripts': '脚本',
@@ -947,6 +958,8 @@ export const translations = {
     'script.messages.batchDeleteSuccess': '已刪除 {count} 個腳本',
     'script.messages.batchDeleteError': '批次刪除失敗',
     'script.messages.invalidFormat': '無效的腳本檔案格式',
+    'script.messages.recordingConfigUpdated': '錄製配置已更新',
+    'script.messages.recordingConfigError': '更新錄製配置失敗',
     'script.messages.dataExportedJSON': '資料已匯出為 JSON',
     'script.messages.dataExportedCSV': '資料已匯出為 CSV',
     'script.tutorial.title': '教學',
@@ -1421,6 +1434,9 @@ export const translations = {
     'cookie.messages.noCookiesToExport': '沒有 Cookie 可供匯出',
     'cookie.messages.exportSuccess': '成功匯出 {count} 個 Cookie',
     'cookie.messages.exportError': '匯出失敗',
+
+    'success.mcpCommandDisabled': '已禁用為MCP命令: {0}',
+    'success.mcpCommandSet': '已設置MCP命令: {0}',
   },
 
   'en': {
@@ -1515,6 +1531,9 @@ export const translations = {
     'success.scriptSaved': 'Script saved',
     'success.executionRecordDeleted': 'Execution record deleted',
     'success.recordingConfigUpdated': 'Recording config updated',
+
+    'success.mcpCommandDisabled': 'Disabled MCP command: {0}',
+    'success.mcpCommandSet': 'Set MCP command: {0}',
 
     // Navigation
     'nav.browser': 'Browser',
@@ -1619,9 +1638,9 @@ export const translations = {
     'script.messages.batchTagsError': 'Failed to batch add tags',
     'script.messages.batchDeleteSuccess': 'Deleted {count} scripts',
     'script.messages.batchDeleteError': 'Failed to batch delete',
-    'script.messages.recordingConfigUpdated': 'Recording config updated',
-    'script.messages.recordingConfigError': 'Failed to update recording config',
     'script.messages.invalidFormat': 'Invalid script file format',
+    'script.messages.recordingConfigUpdated': 'Recording configuration updated',
+    'script.messages.recordingConfigError': 'Failed to update recording configuration',
     'script.recordingConfig.title': 'Recording Config',
     'script.recordingConfig.enabled': 'Enable Recording',
     'script.recordingConfig.enabledDesc': 'Automatically record playback as video',
@@ -2122,7 +2141,11 @@ export const translations = {
     'dashboard.highlights.ai.title': 'AI Powered',
     'dashboard.highlights.ai.desc': 'Enable large models to invoke scripts via MCP',
 
-    // 参数对话框
+    'agent.sessionDeleted': 'Session deleted',
+    'agent.llmConfigSet': 'LLM configuration set',
+    'agent.llmConfigReloaded': 'LLM configuration reloaded',
+
+    // Parameter dialog
     'script.params.title': 'Fill Script Parameters',
     'script.params.description': 'This script requires the following parameters. Please provide specific values:',
     'script.params.scriptName': 'Script',
@@ -2228,9 +2251,13 @@ export const translations = {
     'success.executionRecordDeleted': 'Registro de ejecución eliminado',
     'success.recordingConfigUpdated': 'Configuración de grabación actualizada',
 
+    'success.mcpCommandDisabled': 'Comando MCP deshabilitado: {0}',
+    'success.mcpCommandSet': 'Comando MCP establecido: {0}',
+
     // Navegación
     'nav.browser': 'Navegador',
     'nav.scripts': 'Scripts',
+    'nav.scriptExecutions': 'Historial de Ejecución',
     'nav.agent': 'Agente AI',
     'nav.llm': 'LLM',
     'nav.prompts': 'Prompts',
@@ -2363,6 +2390,15 @@ export const translations = {
     'script.tutorial.mcp.integration': 'Integración de herramientas',
     'script.tutorial.mcp.integrationDesc': 'Usa scripts como comandos en otras herramientas',
     'script.tutorial.mcp.copyDesc': 'Click to copy MCP server configuration',
+    'script.tutorial.http.title': 'Llamada HTTP API',
+    'script.tutorial.http.usage': 'Llamar script mediante HTTP API',
+    'script.tutorial.http.description': 'Puede llamar scripts mediante solicitudes HTTP POST para automatización o integración en otros sistemas.',
+    'script.tutorial.http.endpoint': 'Endpoint API',
+    'script.tutorial.http.method': 'Método de solicitud',
+    'script.tutorial.http.curlExample': 'Ejemplo cURL',
+    'script.tutorial.http.withParams': 'Ejemplo de llamada con parámetros',
+    'script.tutorial.http.responseFormat': 'Formato de respuesta',
+    'script.tutorial.http.responseDesc': 'La API devolverá los resultados de ejecución del script, incluyendo estado, datos capturados, etc.',
     'common.copy': 'Copiar',
     'script.card.select': 'Seleccionar',
     'script.card.deselect': 'Deseleccionar',
@@ -2376,7 +2412,16 @@ export const translations = {
     'script.card.deleteScript': 'Eliminar script',
     'script.card.mcpSet': 'Establecer como comando MCP',
     'script.card.mcpCancel': 'MCP: {name} (clic para cancelar)',
+    'script.card.copyCurl': 'Copiar comando cURL',
+    'script.card.curlCopied': 'Comando cURL copiado al portapapeles',
     'script.card.addInputAction': 'Añadir acción de entrada',
+    'script.mcp.aiAssist': 'Asistente AI',
+    'script.mcp.aiAssistDesc': 'Dejar que AI genere automáticamente la configuración MCP basada en el contenido del script, incluyendo nombre de comando, descripción y definiciones de parámetros',
+    'script.mcp.generateConfig': '🤖 AI Generar Configuración',
+    'script.mcp.generating': 'Generando...',
+    'script.mcp.generateSuccess': 'AI ha generado la configuración, por favor revisa y ajusta',
+    'script.mcp.generateError': 'Error al generar configuración con AI',
+    'script.mcp.generateParseError': 'No se pudo analizar la respuesta de AI',
     'script.dialog.batchGroup.title': 'Establecer Grupo por Lotes',
     'script.dialog.batchGroup.message': 'Establecer grupo para {count} scripts seleccionados',
     'script.dialog.batchGroup.placeholder': 'Ingrese nombre del grupo',
@@ -2572,6 +2617,30 @@ export const translations = {
     'browser.messages.stopInfo': 'Cerrando navegador correctamente, guardando estado de inicio de sesión...',
     'browser.messages.stopSuccess': 'Estado de inicio de sesión guardado',
     'browser.messages.stopError': 'Error al detener',
+
+    // Gestión de herramientas
+    'toolManager.title': 'Gestión de Herramientas',
+    'toolManager.subtitle': 'Gestionar herramientas y funciones disponibles para AI Agent',
+    'toolManager.presetTools': 'Herramientas Predefinidas',
+    'toolManager.scriptTools': 'Herramientas de Script',
+    'toolManager.enabled': 'Habilitado',
+    'toolManager.disabled': 'Deshabilitado',
+    'toolManager.configure': 'Configurar Parámetros',
+    'toolManager.noTools': 'Sin herramientas',
+    'toolManager.syncTools': 'Sincronizar Herramientas',
+    'toolManager.syncSuccess': 'Herramientas sincronizadas exitosamente',
+    'toolManager.syncFailed': 'Error al sincronizar herramientas',
+    'toolManager.updateSuccess': 'Configuración de herramienta actualizada',
+    'toolManager.updateFailed': 'Error al actualizar configuración de herramienta',
+    'toolManager.parameterConfig': 'Configuración de Parámetros',
+    'toolManager.noParameters': 'Esta herramienta no tiene parámetros configurables',
+    'toolManager.parameterName': 'Nombre del Parámetro',
+    'toolManager.parameterValue': 'Valor del Parámetro',
+    'toolManager.parameterRequired': 'Obligatorio',
+    'toolManager.parameterOptional': 'Opcional',
+    'toolManager.toolType.preset': 'Predefinido',
+    'toolManager.toolType.script': 'Script',
+
     'browser.messages.urlRequired': 'Por favor ingrese la URL',
     'browser.messages.openError': 'Error al abrir página',
     'browser.messages.cookieSaved': 'Se guardaron {count} cookies',
@@ -2903,6 +2972,9 @@ export const translations = {
     'success.scriptSaved': 'スクリプトが保存されました',
     'success.executionRecordDeleted': '実行記録が削除されました',
     'success.recordingConfigUpdated': '録画設定が更新されました',
+
+    'success.mcpCommandDisabled': 'MCPコマンドが無効化されました',
+    'success.mcpCommandSet': 'MCPコマンドが設定されました',
 
     // ナビゲーション
     'nav.browser': 'ブラウザ',
@@ -3267,6 +3339,30 @@ export const translations = {
     'browser.messages.stopInfo': 'ブラウザを正常に終了し、ログイン状態を保存しています...',
     'browser.messages.stopSuccess': 'ログイン状態が保存されました',
     'browser.messages.stopError': '停止に失敗しました',
+
+    // ツール管理
+    'toolManager.title': 'ツール管理',
+    'toolManager.subtitle': 'AI Agentで利用可能なツールと機能を管理',
+    'toolManager.presetTools': 'プリセットツール',
+    'toolManager.scriptTools': 'スクリプトツール',
+    'toolManager.enabled': '有効',
+    'toolManager.disabled': '無効',
+    'toolManager.configure': 'パラメータを設定',
+    'toolManager.noTools': 'ツールがありません',
+    'toolManager.syncTools': 'ツールを同期',
+    'toolManager.syncSuccess': 'ツールの同期に成功しました',
+    'toolManager.syncFailed': 'ツールの同期に失敗しました',
+    'toolManager.updateSuccess': 'ツール設定が更新されました',
+    'toolManager.updateFailed': 'ツール設定の更新に失敗しました',
+    'toolManager.parameterConfig': 'パラメータ設定',
+    'toolManager.noParameters': 'このツールには設定可能なパラメータがありません',
+    'toolManager.parameterName': 'パラメータ名',
+    'toolManager.parameterValue': 'パラメータ値',
+    'toolManager.parameterRequired': '必須',
+    'toolManager.parameterOptional': '任意',
+    'toolManager.toolType.preset': 'プリセット',
+    'toolManager.toolType.script': 'スクリプト',
+
     'browser.messages.urlRequired': 'URLを入力してください',
     'browser.messages.openError': 'ページを開くのに失敗しました',
     'browser.messages.cookieSaved': '{count} 個のCookieを保存しました',
