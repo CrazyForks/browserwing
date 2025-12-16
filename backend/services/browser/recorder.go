@@ -530,8 +530,9 @@ func (r *Recorder) injectIframeRecorders(ctx context.Context, page *rod.Page) {
 			logger.Warn(ctx, "Failed to wait for iframe #%d to load: %v", i, err)
 		}
 
-		// 在 iframe 的页面上下文中注入录制脚本
-		_, err = frame.Eval(`() => { ` + iframeRecorderScript + ` return true; }`)
+		// 在 iframe 的页面上下文中注入录制脚本（使用本地化版本）
+		localizedIframeScript := ReplaceI18nPlaceholders(iframeRecorderScript, r.language, RecorderI18n)
+		_, err = frame.Eval(`() => { ` + localizedIframeScript + ` return true; }`)
 		if err != nil {
 			logger.Warn(ctx, "Failed to inject script into iframe #%d: %v", i, err)
 		} else {
@@ -583,8 +584,9 @@ func (r *Recorder) watchForNewIframes(ctx context.Context, page *rod.Page) {
 						logger.Warn(ctx, "Failed to wait for new iframe #%d to load: %v", i, err)
 					}
 
-					// 在 iframe 的页面上下文中注入录制脚本
-					_, err = frame.Eval(`() => { ` + iframeRecorderScript + ` return true; }`)
+					// 在 iframe 的页面上下文中注入录制脚本（使用本地化版本）
+					localizedIframeScript := ReplaceI18nPlaceholders(iframeRecorderScript, r.language, RecorderI18n)
+					_, err = frame.Eval(`() => { ` + localizedIframeScript + ` return true; }`)
 					if err != nil {
 						logger.Warn(ctx, "Failed to inject script into new iframe #%d: %v", i, err)
 					} else {
@@ -674,8 +676,9 @@ func (r *Recorder) watchForPageNavigation(ctx context.Context, page *rod.Page) {
 						logger.Warn(ctx, "Failed to set recording mode flag after navigation: %v", err)
 					}
 
-					// 重新注入录制脚本
-					_, err = page.Eval(`() => { ` + recorderScript + ` return true; }`)
+					// 重新注入录制脚本（使用本地化版本）
+					localizedScript := ReplaceI18nPlaceholders(recorderScript, r.language, RecorderI18n)
+					_, err = page.Eval(`() => { ` + localizedScript + ` return true; }`)
 					if err != nil {
 						logger.Error(ctx, "Failed to reinject recording script after navigation: %v", err)
 					} else {

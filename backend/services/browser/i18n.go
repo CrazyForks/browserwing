@@ -267,7 +267,7 @@ func ReplaceI18nPlaceholders(script string, language string, i18nMap map[string]
 	result := script
 	for key, value := range texts {
 		placeholder := "{{" + key + "}}"
-		result = strings.Replace(result, placeholder, value, -1)
+		result = strings.ReplaceAll(result, placeholder, value)
 	}
 
 	return result
