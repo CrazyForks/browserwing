@@ -280,11 +280,11 @@ if (window.__browserwingRecorder__) {
 		
 		// 抓取模式下使用不同颜色
 		if (window.__extractMode__) {
-			highlight.style.borderColor = '#1f2937';
-			highlight.style.boxShadow = '0 0 0 2px rgba(31,41,55,0.15)';
+			highlight.style.borderColor = '#82dee4ff';
+			highlight.style.boxShadow = '0 0 0 2px rgba(119, 192, 252, 0.39)';
 		} else {
-			highlight.style.borderColor = '#6b7280';
-			highlight.style.boxShadow = '0 0 0 2px rgba(107,114,128,0.1)';
+			highlight.style.borderColor = '#82dee4ff';
+			highlight.style.boxShadow = '0 0 0 2px rgba(119, 192, 252, 0.39)';
 		}
 	};
 	

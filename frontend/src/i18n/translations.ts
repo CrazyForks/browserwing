@@ -479,6 +479,9 @@ export const translations = {
     'agentChat.tools': '工具',
     'agentChat.sessionDeleted': '会话已删除',
     'agentChat.sessionCreated': '新会话已创建',
+    'agentChat.deleteSessionFailed': '删除会话失败',
+    'agentChat.createSessionFailed': '创建会话失败',
+    'agentChat.thinking': '正在思考中',
 
     // 工具管理
     'toolManager.title': '工具管理',
@@ -926,6 +929,9 @@ export const translations = {
     'agentChat.tools': '工具',
     'agentChat.sessionDeleted': '會話已刪除',
     'agentChat.sessionCreated': '新會話已建立',
+    'agentChat.deleteSessionFailed': '刪除會話失敗',
+    'agentChat.createSessionFailed': '建立會話失敗',
+    'agentChat.thinking': '正在思考中',
 
     // 工具管理
     'toolManager.title': '工具管理',
@@ -2025,6 +2031,9 @@ export const translations = {
     'agentChat.tools': 'tools',
     'agentChat.sessionDeleted': 'Session deleted',
     'agentChat.sessionCreated': 'New session created',
+    'agentChat.deleteSessionFailed': 'Failed to delete session',
+    'agentChat.createSessionFailed': 'Failed to create session',
+    'agentChat.thinking': 'Thinking',
 
     // Tool Manager
     'toolManager.title': 'Tool Management',
@@ -2807,6 +2816,9 @@ export const translations = {
     'agentChat.tools': 'herramientas',
     'agentChat.sessionDeleted': 'Sesión eliminada',
     'agentChat.sessionCreated': 'Nueva sesión creada',
+    'agentChat.deleteSessionFailed': 'Error al eliminar sesión',
+    'agentChat.createSessionFailed': 'Error al crear sesión',
+    'agentChat.thinking': 'Pensando',
 
     // Gestión del Navegador
     'browser.title': 'Gestión del Navegador',
@@ -3594,6 +3606,9 @@ export const translations = {
     'agentChat.tools': 'ツール',
     'agentChat.sessionDeleted': 'セッションが削除されました',
     'agentChat.sessionCreated': '新しいセッションが作成されました',
+    'agentChat.deleteSessionFailed': 'セッションの削除に失敗しました',
+    'agentChat.createSessionFailed': 'セッションの作成に失敗しました',
+    'agentChat.thinking': '考え中',
 
     // ブラウザ管理
     'browser.title': 'ブラウザ管理',

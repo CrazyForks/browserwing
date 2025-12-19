@@ -504,10 +504,17 @@ export default function AgentChat() {
                         >
                           {/* 消息内容 - 支持 Markdown 渲染 */}
                           {message.role === 'assistant' ? (
-                            <MarkdownRenderer 
-                              content={message.content || (isStreaming ? '...' : '')} 
-                              className="text-base"
-                            />
+                            message.content ? (
+                              <MarkdownRenderer 
+                                content={message.content} 
+                                className="text-base"
+                              />
+                            ) : isStreaming ? (
+                              <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span className="text-base italic">{t('agentChat.thinking')}</span>
+                              </div>
+                            ) : null
                           ) : (
                             <div className="whitespace-pre-wrap break-words text-base">
                               {message.content}
