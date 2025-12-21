@@ -2,7 +2,7 @@
 
 ## 功能概述
 
-BrowserPilot 现在支持将录制的自动化脚本转换为 MCP (Model Context Protocol) 命令,可以被外部 MCP 客户端调用。
+browserwing 现在支持将录制的自动化脚本转换为 MCP (Model Context Protocol) 命令,可以被外部 MCP 客户端调用。
 
 **支持两种通信模式:**
 - **HTTP/SSE 模式** (推荐): 通过 HTTP API 调用,支持远程访问
@@ -92,7 +92,7 @@ MCP 服务器支持标准的 MCP 协议,提供两种调用方式:
 ```json
 {
   "mcpServers": {
-    "browserpilot": {
+    "browserwing": {
       "url": "http://localhost:8080/api/v1/mcp/message"
     }
   }
@@ -129,7 +129,7 @@ curl -X POST http://localhost:8080/api/v1/mcp/message \
 ```json
 {
   "mcpServers": {
-    "browserpilot": {
+    "browserwing": {
       "command": "/path/to/browserwing",
       "args": []
     }
@@ -373,7 +373,7 @@ backend/
 ```json
 {
   "mcpServers": {
-    "browserpilot": {
+    "browserwing": {
       "url": "http://localhost:8080/api/v1/mcp/message",
       "transport": "http"
     }
@@ -388,7 +388,7 @@ backend/
 ```json
 {
   "mcpServers": {
-    "browserpilot": {
+    "browserwing": {
       "command": "/path/to/browserwing",
       "args": []
     }
@@ -403,7 +403,7 @@ backend/
 ```json
 {
   "mcp.servers": {
-    "browserpilot": {
+    "browserwing": {
       "url": "http://localhost:8080/api/v1/mcp/message"
     }
   }
@@ -415,7 +415,7 @@ backend/
 ```json
 {
   "mcp.servers": {
-    "browserpilot": {
+    "browserwing": {
       "command": "/path/to/browserwing"
     }
   }
@@ -431,7 +431,7 @@ backend/
   "experimental": {
     "modelContextProtocolServers": [
       {
-        "name": "browserpilot",
+        "name": "browserwing",
         "url": "http://localhost:8080/api/v1/mcp/message"
       }
     ]

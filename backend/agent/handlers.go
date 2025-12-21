@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/browserwing/browserwing/models"
 	"github.com/browserwing/browserwing/pkg/logger"
 	"github.com/gin-gonic/gin"
 )
@@ -74,12 +75,36 @@ func (h *Handler) SendMessage(c *gin.Context) {
 	sessionID := c.Param("id")
 
 	var req struct {
-		Message string `json:"message" binding:"required"`
+		Message     string `json:"message" binding:"required"`
+		LLMConfigID string `json:"llm_config_id"` // 可选的 LLM 配置 ID
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "error.messageEmpty"})
 		return
+	}
+
+	// 如果指定了 LLM 配置，临时切换
+	var originalConfig *models.LLMConfigModel
+	if req.LLMConfigID != "" {
+		config, err := h.manager.db.GetLLMConfig(req.LLMConfigID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "error.configNotFound"})
+			return
+		}
+		// 临时保存当前配置
+		originalConfig = h.manager.currentLLMConfig
+		// 设置新配置
+		if err := h.manager.SetLLMConfig(config); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// 处理完毕后恢复原配置
+		defer func() {
+			if originalConfig != nil {
+				h.manager.SetLLMConfig(originalConfig)
+			}
+		}()
 	}
 
 	// 设置 SSE 响应头
@@ -100,24 +125,39 @@ func (h *Handler) SendMessage(c *gin.Context) {
 		return
 	}
 
+	// 获取请求上下文（当客户端断开时会被取消）
+	ctx := c.Request.Context()
+
 	// 在后台处理消息
 	go func() {
-		if err := h.manager.SendMessage(sessionID, req.Message, streamChan); err != nil {
-			logger.Warn(c.Request.Context(), "Failed to send message: %v", err)
+		if err := h.manager.SendMessage(ctx, sessionID, req.Message, streamChan); err != nil {
+			logger.Warn(ctx, "Failed to send message: %v", err)
 		}
 	}()
 
 	// 发送流式数据
-	for chunk := range streamChan {
-		data, err := json.Marshal(chunk)
-		if err != nil {
-			logger.Warn(c.Request.Context(), "Failed to serialize data chunk: %v", err)
-			continue
-		}
+	for {
+		select {
+		case <-ctx.Done():
+			// 客户端断开连接，停止发送
+			logger.Info(ctx, "Client disconnected, stopping stream")
+			return
+		case chunk, ok := <-streamChan:
+			if !ok {
+				// 通道已关闭，流式传输完成
+				return
+			}
 
-		// SSE 格式: data: {json}\n\n
-		fmt.Fprintf(w, "data: %s\n\n", string(data))
-		flusher.Flush()
+			data, err := json.Marshal(chunk)
+			if err != nil {
+				logger.Warn(ctx, "Failed to serialize data chunk: %v", err)
+				continue
+			}
+
+			// SSE 格式: data: {json}\n\n
+			fmt.Fprintf(w, "data: %s\n\n", string(data))
+			flusher.Flush()
+		}
 	}
 }
 

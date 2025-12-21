@@ -293,7 +293,7 @@ func (s *MCPServer) processRequest(req MCPRequest) MCPResponse {
 					"tools": map[string]interface{}{},
 				},
 				"serverInfo": map[string]interface{}{
-					"name":    "browserpilot",
+					"name":    "browserwing",
 					"version": "1.0.0",
 				},
 			},

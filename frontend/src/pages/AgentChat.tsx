@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Send, Loader2, Bot, Wrench, CheckCircle2, XCircle, Trash2, MessageSquarePlus, Copy, Check, ChevronDown } from 'lucide-react'
+import { Send, Loader2, Bot, Wrench, CheckCircle2, XCircle, Trash2, MessageSquarePlus, Copy, Check, ChevronDown, StopCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import Toast from '../components/Toast'
 import MarkdownRenderer from '../components/MarkdownRenderer'
@@ -54,6 +54,7 @@ export default function AgentChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const llmDropdownRef = useRef<HTMLDivElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   // 自动滚动到底部
   const scrollToBottom = () => {
@@ -170,6 +171,16 @@ export default function AgentChat() {
     }
   }
 
+  // 停止消息生成
+  const stopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    setIsStreaming(false)
+    showToastMessage(t('agentChat.generationStopped'), 'info')
+  }
+
   // 发送消息
   const sendMessage = async () => {
     if (!inputMessage.trim() || !currentSession || isStreaming) {
@@ -179,6 +190,9 @@ export default function AgentChat() {
     const userMessage = inputMessage.trim()
     setInputMessage('')
     setIsStreaming(true)
+
+    // 创建 AbortController
+    abortControllerRef.current = new AbortController()
 
     // 添加用户消息到界面
     const tempUserMsg: ChatMessage = {
@@ -212,6 +226,7 @@ export default function AgentChat() {
           message: userMessage,
           llm_config_id: selectedLlm || undefined, // 传递选中的 LLM ID
         }),
+        signal: abortControllerRef.current.signal, // 添加 abort signal
       })
 
       if (!response.ok) {
@@ -341,10 +356,17 @@ export default function AgentChat() {
         )
       })
 
-    } catch (error) {
+    } catch (error: any) {
+      // 如果是用户主动取消，不显示错误
+      if (error.name === 'AbortError') {
+        console.log('请求已取消')
+        return
+      }
       console.error('发送消息失败:', error)
       showToastMessage(t('agentChat.sendMessageFailed'), 'error')
       setIsStreaming(false)
+    } finally {
+      abortControllerRef.current = null
     }
   }
 
@@ -607,12 +629,13 @@ export default function AgentChat() {
                         disabled={isStreaming}
                       />
                       <button
-                        onClick={sendMessage}
-                        disabled={!inputMessage.trim() || isStreaming}
+                        onClick={isStreaming ? stopGeneration : sendMessage}
+                        disabled={!isStreaming && !inputMessage.trim()}
                         className="flex-shrink-0 p-2 bg-gray-900 dark:bg-gray-700 text-white rounded-xl hover:bg-gray-800 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        title={isStreaming ? t('agentChat.stopGeneration') : t('agentChat.send')}
                       >
                         {isStreaming ? (
-                          <Loader2 className="w-5 h-5 animate-spin" />
+                          <StopCircle className="w-5 h-5" />
                         ) : (
                           <Send className="w-5 h-5" />
                         )}

@@ -146,16 +146,17 @@ func (t *MCPTool) Parameters() map[string]interfaces.ParameterSpec {
 
 // AgentManager Agent 管理器
 type AgentManager struct {
-	db         *storage.BoltDB
-	mcpServer  *browsermcp.MCPServer
-	sessions   map[string]*ChatSession
-	agents     map[string]*agent.Agent // sessionID -> Agent 实例
-	llmClient  interfaces.LLM
-	toolReg    *tools.Registry
-	mu         sync.RWMutex
-	ctx        context.Context
-	cancel     context.CancelFunc
-	mcpWatcher *time.Ticker // MCP 命令监听器
+	db               *storage.BoltDB
+	mcpServer        *browsermcp.MCPServer
+	sessions         map[string]*ChatSession
+	agents           map[string]*agent.Agent // sessionID -> Agent 实例
+	llmClient        interfaces.LLM
+	currentLLMConfig *models.LLMConfigModel // 当前使用的 LLM 配置
+	toolReg          *tools.Registry
+	mu               sync.RWMutex
+	ctx              context.Context
+	cancel           context.CancelFunc
+	mcpWatcher       *time.Ticker // MCP 命令监听器
 }
 
 // NewAgentManager 创建 Agent 管理器
@@ -350,6 +351,7 @@ func (am *AgentManager) SetLLMConfig(config *models.LLMConfigModel) error {
 
 	am.mu.Lock()
 	am.llmClient = client
+	am.currentLLMConfig = config
 	am.mu.Unlock()
 
 	logger.Info(am.ctx, "✓ LLM configuration loaded successfully: %s", GetProviderInfo(config))
@@ -518,7 +520,7 @@ func (am *AgentManager) GetSession(sessionID string) (*ChatSession, error) {
 }
 
 // SendMessage 发送消息 (流式)
-func (am *AgentManager) SendMessage(sessionID, userMessage string, streamChan chan<- StreamChunk) error {
+func (am *AgentManager) SendMessage(ctx context.Context, sessionID, userMessage string, streamChan chan<- StreamChunk) error {
 	defer close(streamChan)
 
 	// 检查 LLM 是否已配置
@@ -588,11 +590,11 @@ func (am *AgentManager) SendMessage(sessionID, userMessage string, streamChan ch
 	}
 
 	// 创建多租户上下文
-	ctx := multitenancy.WithOrgID(am.ctx, "browserpilot")
-	ctx = context.WithValue(ctx, memory.ConversationIDKey, sessionID)
+	agentCtx := multitenancy.WithOrgID(ctx, "browserwing")
+	agentCtx = context.WithValue(agentCtx, memory.ConversationIDKey, sessionID)
 
 	// 使用 Agent 流式处理消息
-	streamEvents, err := ag.RunStream(ctx, userMessage)
+	streamEvents, err := ag.RunStream(agentCtx, userMessage)
 	if err != nil {
 		streamChan <- StreamChunk{
 			Type:  "error",
@@ -611,86 +613,99 @@ func (am *AgentManager) SendMessage(sessionID, userMessage string, streamChan ch
 	// 处理流式事件
 	toolCallMap := make(map[string]*ToolCall) // 用于跟踪工具调用状态
 
-	for event := range streamEvents {
-		switch event.Type {
-		case interfaces.AgentEventContent:
-			// 文本内容
-			assistantMsg.Content += event.Content
-			streamChan <- StreamChunk{
-				Type:      "message",
-				Content:   event.Content,
-				MessageID: assistantMsg.ID,
+	for {
+		select {
+		case <-ctx.Done():
+			// 客户端取消请求，停止处理
+			logger.Info(ctx, "Request cancelled by client, stopping message processing")
+			return ctx.Err()
+		case event, ok := <-streamEvents:
+			if !ok {
+				// 流式事件通道已关闭，处理完成
+				goto processingComplete
 			}
 
-		case interfaces.AgentEventToolResult:
-			logger.Warn(ctx, "Received unhandled tool result event: %+v", event)
-			if event.ToolCall == nil {
-				logger.Error(ctx, "Tool result event missing ToolCall information")
-				continue
-			}
-			tc := event.ToolCall
-			toolCall, exists := toolCallMap[tc.Name]
-			if !exists {
-				continue
-			}
-
-			// 更新工具调用状态
-			switch tc.Status {
-			case "executing":
-				toolCall.Status = "calling"
-				toolCall.Message = "执行中..."
-			case "completed":
-				toolCall.Status = "success"
-				toolCall.Message = "调用成功"
-			case "error":
-				toolCall.Status = "error"
-				toolCall.Message = "调用失败"
-			}
-
-			// 发送工具调用状态
-			streamChan <- StreamChunk{
-				Type:     "tool_call",
-				ToolCall: toolCall,
-			}
-
-		case interfaces.AgentEventToolCall:
-			logger.Warn(ctx, "Received unhandled tool call event: %+v", event)
-			// 工具调用
-			if event.ToolCall == nil {
-				logger.Error(ctx, "Tool call event missing ToolCall information")
-				continue
-			}
-			tc := event.ToolCall
-
-			// 获取或创建工具调用记录
-			toolCall, exists := toolCallMap[tc.Name]
-			if !exists {
-				toolCall = &ToolCall{
-					ToolName: tc.Name,
-					Status:   "calling",
+			switch event.Type {
+			case interfaces.AgentEventContent:
+				// 文本内容
+				assistantMsg.Content += event.Content
+				streamChan <- StreamChunk{
+					Type:      "message",
+					Content:   event.Content,
+					MessageID: assistantMsg.ID,
 				}
-				toolCallMap[tc.Name] = toolCall
-				assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, toolCall)
-			}
-			// 发送工具调用状态
-			streamChan <- StreamChunk{
-				Type:     "tool_call",
-				ToolCall: toolCall,
-			}
-		case interfaces.AgentEventThinking:
-			// 思考过程(可选择性展示)
-			logger.Debug(ctx, "Agent thinking: %s", event.ThinkingStep)
 
-		case interfaces.AgentEventError:
-			// 错误
-			streamChan <- StreamChunk{
-				Type:  "error",
-				Error: event.Error.Error(),
+			case interfaces.AgentEventToolResult:
+				logger.Warn(ctx, "Received unhandled tool result event: %+v", event)
+				if event.ToolCall == nil {
+					logger.Error(ctx, "Tool result event missing ToolCall information")
+					continue
+				}
+				tc := event.ToolCall
+				toolCall, exists := toolCallMap[tc.Name]
+				if !exists {
+					continue
+				}
+
+				// 更新工具调用状态
+				switch tc.Status {
+				case "executing":
+					toolCall.Status = "calling"
+					toolCall.Message = "执行中..."
+				case "completed":
+					toolCall.Status = "success"
+					toolCall.Message = "调用成功"
+				case "error":
+					toolCall.Status = "error"
+					toolCall.Message = "调用失败"
+				}
+
+				// 发送工具调用状态
+				streamChan <- StreamChunk{
+					Type:     "tool_call",
+					ToolCall: toolCall,
+				}
+
+			case interfaces.AgentEventToolCall:
+				logger.Warn(ctx, "Received unhandled tool call event: %+v", event)
+				// 工具调用
+				if event.ToolCall == nil {
+					logger.Error(ctx, "Tool call event missing ToolCall information")
+					continue
+				}
+				tc := event.ToolCall
+
+				// 获取或创建工具调用记录
+				toolCall, exists := toolCallMap[tc.Name]
+				if !exists {
+					toolCall = &ToolCall{
+						ToolName: tc.Name,
+						Status:   "calling",
+					}
+					toolCallMap[tc.Name] = toolCall
+					assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, toolCall)
+				}
+				// 发送工具调用状态
+				streamChan <- StreamChunk{
+					Type:     "tool_call",
+					ToolCall: toolCall,
+				}
+			case interfaces.AgentEventThinking:
+				// 思考过程(可选择性展示)
+				logger.Debug(ctx, "Agent thinking: %s", event.ThinkingStep)
+
+			case interfaces.AgentEventError:
+				// 错误
+				streamChan <- StreamChunk{
+					Type:  "error",
+					Error: event.Error.Error(),
+				}
+				return event.Error
 			}
-			return event.Error
 		}
 	}
 
+processingComplete:
 	// 保存助手消息
 	am.mu.Lock()
 	session.Messages = append(session.Messages, assistantMsg)

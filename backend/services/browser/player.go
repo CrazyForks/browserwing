@@ -39,7 +39,7 @@ func (p *Player) highlightElement(ctx context.Context, element *rod.Element) {
 
 	// 添加高亮边框样式
 	_, err := element.Eval(`() => {
-		this.setAttribute('data-browserpilot-original-style', this.style.cssText || '');
+		this.setAttribute('data-browserwing-original-style', this.style.cssText || '');
 		this.style.outline = '3px solid #3b82f6';
 		this.style.outlineOffset = '2px';
 		this.style.boxShadow = '0 0 0 4px rgba(59, 130, 246, 0.3)';
@@ -57,10 +57,10 @@ func (p *Player) unhighlightElement(ctx context.Context, element *rod.Element) {
 
 	// 移除高亮样式，恢复原始样式
 	_, err := element.Eval(`() => {
-		const originalStyle = this.getAttribute('data-browserpilot-original-style');
+		const originalStyle = this.getAttribute('data-browserwing-original-style');
 		if (originalStyle !== null) {
 			this.style.cssText = originalStyle;
-			this.removeAttribute('data-browserpilot-original-style');
+			this.removeAttribute('data-browserwing-original-style');
 		} else {
 			this.style.outline = '';
 			this.style.outlineOffset = '';

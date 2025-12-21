@@ -2386,7 +2386,7 @@ export default function ScriptManager() {
                             className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow"
                             onClick={() => navigator.clipboard.writeText(JSON.stringify({
                               mcpServers: {
-                                browserpilot: {
+                                browserwing: {
                                   url: `http://${window.location.hostname}:18089/api/v1/mcp/message`
                                 }
                               }
@@ -2400,7 +2400,7 @@ export default function ScriptManager() {
                             <pre className="bg-gray-50 dark:bg-gray-950 rounded p-2 text-xs font-mono overflow-x-auto dark:text-gray-300">
                               {`{
   "mcpServers": {
-    "browserpilot": {
+    "browserwing": {
       "url": "http://${window.location.hostname}:18089/api/v1/mcp/message"
     }
   }
@@ -2544,7 +2544,7 @@ function SortableActionItem({ id, action, index, onUpdate, onDelete, onDuplicate
             <span className="font-mono text-sm bg-gray-100 dark:bg-gray-700 dark:text-gray-300 px-2.5 py-1 rounded font-medium">
               #{index + 1}
             </span>
-            <span className="font-semibold text-base text-gray-900 dark:text-gray-100">{action.type}</span>
+            <span className="font-semibold text-base text-gray-900 dark:text-gray-100">{t(action.type)}</span>
           </div>
           <div className="space-y-3">
             {action.type !== 'sleep' && action.type !== 'wait' && action.type !== 'execute_js' && action.type !== 'upload_file' && (
@@ -2653,7 +2653,7 @@ function SortableActionItem({ id, action, index, onUpdate, onDelete, onDuplicate
                   step="100"
                 />
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  {t('script.pagination.showing')} {((action.duration || 1000) / 1000).toFixed(1)} {t('script.action.delaySeconds')}
+                  {((action.duration || 1000) / 1000).toFixed(1)} {t('script.action.delaySeconds')}
                 </p>
               </div>
             )}
@@ -2754,7 +2754,7 @@ function ActionItemView({ action, index }: ActionItemViewProps) {
           <span className="font-mono text-sm bg-gray-100 dark:bg-gray-900 px-2.5 py-1 rounded font-medium text-gray-900 dark:text-gray-100">
             #{index + 1}
           </span>
-          <span className="font-semibold text-base text-gray-900 dark:text-gray-100">{action.type}</span>
+          <span className="font-semibold text-base text-gray-900 dark:text-gray-100">{t(action.type)}</span>
         </div>
         {action.selector && (
           <div className="text-sm text-gray-600 dark:text-gray-400">

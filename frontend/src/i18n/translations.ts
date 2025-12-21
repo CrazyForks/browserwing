@@ -220,6 +220,18 @@ export const translations = {
     'script.messages.recordingConfigUpdated': '录制配置已更新',
     'script.messages.recordingConfigError': '更新录制配置失败',
     'script.messages.invalidFormat': '无效的脚本文件格式',
+
+    'click': '点击',
+    'input': '输入',
+    'sleep': '延迟',
+    'select': '选择',
+    'navigate': '导航',
+    'execute_js': '执行JS',
+    'extract_text': '提取文本',
+    'extract_html': '提取HTML',
+    'extract_attribute': '提取属性',
+    'upload_file': '上传文件',
+
     // 参数对话框
     'script.params.title': '填写脚本参数',
     'script.params.description': '此脚本需要以下参数,请填写具体值:',
@@ -482,6 +494,9 @@ export const translations = {
     'agentChat.deleteSessionFailed': '删除会话失败',
     'agentChat.createSessionFailed': '创建会话失败',
     'agentChat.thinking': '正在思考中',
+    'agentChat.stopGeneration': '停止生成',
+    'agentChat.send': '发送',
+    'agentChat.generationStopped': '已停止生成',
 
     // 工具管理
     'toolManager.title': '工具管理',
@@ -932,6 +947,9 @@ export const translations = {
     'agentChat.deleteSessionFailed': '刪除會話失敗',
     'agentChat.createSessionFailed': '建立會話失敗',
     'agentChat.thinking': '正在思考中',
+    'agentChat.stopGeneration': '停止生成',
+    'agentChat.send': '發送',
+    'agentChat.generationStopped': '已停止生成',
 
     // 工具管理
     'toolManager.title': '工具管理',
@@ -1063,6 +1081,18 @@ export const translations = {
     'script.tutorial.http.withParams': '帶參數調用範例',
     'script.tutorial.http.responseFormat': '響應格式',
     'script.tutorial.http.responseDesc': 'API 會返回腳本執行結果，包括狀態、抓取的數據等信息。',
+
+    'click': '點擊',
+    'input': '輸入',
+    'sleep': '等待',
+    'select': '選擇',
+    'navigate': '導航',
+    'execute_js': '執行 JS',
+    'extract_text': '擷取文本',
+    'extract_html': '擷取 HTML',
+    'extract_attribute': '擷取屬性',
+    'upload_file': '上傳文件',
+
     'common.copy': '複製',
     'script.card.select': '選擇',
     'script.card.deselect': '取消選擇',
@@ -1823,6 +1853,18 @@ export const translations = {
     'script.tutorial.http.withParams': 'Example with Parameters',
     'script.tutorial.http.responseFormat': 'Response Format',
     'script.tutorial.http.responseDesc': 'The API returns script execution results, including status, extracted data, and more.',
+
+    'click': 'click',
+    'input': 'input',
+    'sleep': 'sleep',
+    'select': 'select',
+    'navigate': 'navigate',
+    'execute_js': 'execute js',
+    'extract_text': 'extract text',
+    'extract_html': 'extract html',
+    'extract_attribute': 'extract attribute',
+    'upload_file': 'upload file',
+
     'common.copy': 'Copy',
     'script.card.select': 'Select',
     'script.card.deselect': 'Deselect',
@@ -2034,6 +2076,9 @@ export const translations = {
     'agentChat.deleteSessionFailed': 'Failed to delete session',
     'agentChat.createSessionFailed': 'Failed to create session',
     'agentChat.thinking': 'Thinking',
+    'agentChat.stopGeneration': 'Stop Generation',
+    'agentChat.send': 'Send',
+    'agentChat.generationStopped': 'Generation stopped',
 
     // Tool Manager
     'toolManager.title': 'Tool Management',
@@ -2608,6 +2653,18 @@ export const translations = {
     'script.tutorial.http.withParams': 'Ejemplo de llamada con parámetros',
     'script.tutorial.http.responseFormat': 'Formato de respuesta',
     'script.tutorial.http.responseDesc': 'La API devolverá los resultados de ejecución del script, incluyendo estado, datos capturados, etc.',
+
+    'click': 'Clic',
+    'input': 'Entrada',
+    'sleep': 'Retardo',
+    'select': 'Selección',
+    'navigate': 'Navegación',
+    'execute_js': 'Ejecutar JS',
+    'extract_text': 'Extraer Texto',
+    'extract_html': 'Extraer HTML',
+    'extract_attribute': 'Extraer Atributo',
+    'upload_file': 'Cargar Archivo',
+
     'common.copy': 'Copiar',
     'script.card.select': 'Seleccionar',
     'script.card.deselect': 'Deseleccionar',
@@ -2819,6 +2876,9 @@ export const translations = {
     'agentChat.deleteSessionFailed': 'Error al eliminar sesión',
     'agentChat.createSessionFailed': 'Error al crear sesión',
     'agentChat.thinking': 'Pensando',
+    'agentChat.stopGeneration': 'Detener Generación',
+    'agentChat.send': 'Enviar',
+    'agentChat.generationStopped': 'Generación detenida',
 
     // Gestión del Navegador
     'browser.title': 'Gestión del Navegador',
@@ -3398,6 +3458,18 @@ export const translations = {
     'script.tutorial.http.withParams': 'パラメータ付き呼び出しの例',
     'script.tutorial.http.responseFormat': 'レスポンス形式',
     'script.tutorial.http.responseDesc': 'APIはスクリプトの実行結果（ステータス、抽出されたデータなど）を返します。',
+
+    'click': 'クリック',
+    'input': '入力',
+    'sleep': 'スリープ',
+    'select': '選択',
+    'navigate': 'ナビゲート',
+    'execute_js': 'JS実行',
+    'extract_text': 'テキスト抽出',
+    'extract_html': 'HTML抽出',
+    'extract_attribute': '属性抽出',
+    'upload_file': 'ファイルアップロード',
+
     'common.copy': 'コピー',
     'script.card.select': '選択',
     'script.card.deselect': '選択解除',
@@ -3609,6 +3681,9 @@ export const translations = {
     'agentChat.deleteSessionFailed': 'セッションの削除に失敗しました',
     'agentChat.createSessionFailed': 'セッションの作成に失敗しました',
     'agentChat.thinking': '考え中',
+    'agentChat.stopGeneration': '生成を停止',
+    'agentChat.send': '送信',
+    'agentChat.generationStopped': '生成が停止されました',
 
     // ブラウザ管理
     'browser.title': 'ブラウザ管理',
