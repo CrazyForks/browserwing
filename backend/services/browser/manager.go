@@ -392,6 +392,62 @@ func (m *Manager) Status() map[string]interface{} {
 	return status
 }
 
+func (m *Manager) setPageWindow(page *rod.Page) {
+	ctx := context.Background()
+
+	// 获取屏幕尺寸
+	screenInfo, err := page.Eval(`() => ({
+		width: window.screen.availWidth,
+		height: window.screen.availHeight
+	})`)
+
+	var windowWidth, windowHeight int
+	var viewportWidth, viewportHeight int
+
+	if err == nil && screenInfo != nil {
+		if info, ok := screenInfo.Value.Val().(map[string]interface{}); ok {
+			screenWidth := int(info["width"].(float64))
+			screenHeight := int(info["height"].(float64))
+
+			logger.Info(ctx, "Detected screen size: %dx%d", screenWidth, screenHeight)
+
+			// 窗口大小设置为屏幕大小的 90%
+			windowWidth = int(float64(screenWidth) * 0.9)
+			windowHeight = int(float64(screenHeight) * 0.9)
+
+			// viewport 大小为窗口大小减去浏览器边框和工具栏 (约 120 像素宽度, 100 像素高度)
+			viewportWidth = windowWidth - 120
+			viewportHeight = windowHeight - 100
+
+			logger.Info(ctx, "Calculated window size: %dx%d", windowWidth, windowHeight)
+			logger.Info(ctx, "Calculated viewport size: %dx%d", viewportWidth, viewportHeight)
+		} else {
+			logger.Warn(ctx, "Failed to parse screen info, using default sizes")
+			windowWidth = 1400
+			windowHeight = 900
+			viewportWidth = 1280
+			viewportHeight = 800
+		}
+	} else {
+		logger.Warn(ctx, "Failed to get screen size: %v, using default sizes", err)
+		windowWidth = 1400
+		windowHeight = 900
+		viewportWidth = 1280
+		viewportHeight = 800
+	}
+
+	// 设置浏览器窗口（外壳）
+	page.MustSetWindow(0, 0, windowWidth, windowHeight)
+
+	// 设置页面 viewport（CSS 布局尺寸）
+	page.MustSetViewport(
+		viewportWidth,  // width
+		viewportHeight, // height
+		1,              // deviceScaleFactor
+		false,          // desktop
+	)
+}
+
 // OpenPage 打开一个新页面
 func (m *Manager) OpenPage(url string, language string) error {
 	m.mu.Lock()
@@ -428,38 +484,7 @@ func (m *Manager) OpenPage(url string, language string) error {
 		logger.Info(ctx, "Not using Stealth mode")
 	}
 
-	// 设置窗口最大化，确保内容充满浏览器
-	// page = page.MustWindowMaximize()
-	// logger.Info(ctx, "Window maximized")
-
-	// // 获取窗口实际尺寸并设置Viewport
-	// windowInfo, evalErr := page.Eval(`() => ({
-	// 	width: window.innerWidth,
-	// 	height: window.innerHeight
-	// })`)
-	// if evalErr == nil && windowInfo != nil {
-	// 	if info, ok := windowInfo.Value.Val().(map[string]interface{}); ok {
-	// 		width := int(info["width"].(float64))
-	// 		height := int(info["height"].(float64))
-	// 		page = page.MustSetViewport(width, height, 1, false)
-	// 		logger.Info(ctx, "Viewport set to window size: %dx%d", width, height)
-	// 	}
-	// } else {
-	// 	// 如果获取失败，使用默认值
-	// 	page = page.MustSetViewport(1920, 1080, 1, false)
-	// 	logger.Info(ctx, "Viewport set to default: 1920x1080")
-	// }
-
-	// 设置浏览器窗口（外壳）
-	page.MustSetWindow(0, 0, 1400, 900)
-
-	// 设置页面 viewport（CSS 布局尺寸）
-	page.MustSetViewport(
-		1280,  // width
-		800,   // height
-		1,     // deviceScaleFactor
-		false, // desktop
-	)
+	m.setPageWindow(page)
 
 	// 设置 User Agent
 	userAgent := config.UserAgent
@@ -683,38 +708,7 @@ func (m *Manager) PlayScript(ctx context.Context, script *models.Script) (*model
 		logger.Info(ctx, "Replay not using Stealth mode")
 	}
 
-	// // 设置窗口最大化，确保内容充满浏览器
-	// page = page.MustWindowMaximize()
-	// logger.Info(ctx, "Replay window maximized")
-
-	// // 获取窗口实际尺寸并设置Viewport
-	// windowInfo, evalErr := page.Eval(`() => ({
-	// 	width: window.innerWidth,
-	// 	height: window.innerHeight
-	// })`)
-	// if evalErr == nil && windowInfo != nil {
-	// 	if info, ok := windowInfo.Value.Val().(map[string]interface{}); ok {
-	// 		width := int(info["width"].(float64))
-	// 		height := int(info["height"].(float64))
-	// 		page = page.MustSetViewport(width, height, 1, false)
-	// 		logger.Info(ctx, "Replay viewport set to window size: %dx%d", width, height)
-	// 	}
-	// } else {
-	// 	// 如果获取失败，使用默认值
-	// 	page = page.MustSetViewport(1920, 1080, 1, false)
-	// 	logger.Info(ctx, "Replay viewport set to default: 1920x1080")
-	// }
-
-	// 设置浏览器窗口（外壳）
-	page.MustSetWindow(0, 0, 1400, 900)
-
-	// 设置页面 viewport（CSS 布局尺寸）
-	page.MustSetViewport(
-		1280,  // width
-		800,   // height
-		1,     // deviceScaleFactor
-		false, // desktop
-	)
+	m.setPageWindow(page)
 
 	// 设置 User Agent
 	userAgent := config.UserAgent
