@@ -93,3 +93,7 @@ func Info(ctx context.Context, msg string, args ...any) {
 func Debug(ctx context.Context, msg string, args ...any) {
 	defaultLogger.Debug(ctx, msg, args...)
 }
+
+func GetDefaultLogger() Logger {
+	return defaultLogger
+}

@@ -22,6 +22,8 @@ import (
 	localtools "github.com/browserwing/browserwing/agent/tools"
 )
 
+const maxIterations = 3
+
 const (
 	defSystemPrompt = `You are a helpful AI assistant with access to various tools. When users ask questions or make requests, you should:
 
@@ -438,7 +440,8 @@ func (am *AgentManager) loadSessionsFromDB() error {
 				agent.WithTools(am.toolReg.List()...),
 				agent.WithSystemPrompt(am.GetSystemPrompt()),
 				agent.WithRequirePlanApproval(false),
-				agent.WithMaxIterations(5), // 增加最大迭代次数
+				agent.WithMaxIterations(maxIterations), // 增加最大迭代次数
+				agent.WithLogger(NewAgentLogger()),
 			)
 			if err != nil {
 				logger.Warn(am.ctx, "Failed to create Agent for session %s: %v", session.ID, err)
@@ -489,8 +492,9 @@ func (am *AgentManager) CreateSession() *ChatSession {
 			agent.WithMemory(mem),
 			agent.WithTools(tools...),
 			agent.WithSystemPrompt(am.GetSystemPrompt()),
-			agent.WithRequirePlanApproval(false), // 禁用执行计划审批
-			agent.WithMaxIterations(5),           // 增加最大迭代次数，避免过早触发 final call
+			agent.WithRequirePlanApproval(false),   // 禁用执行计划审批
+			agent.WithMaxIterations(maxIterations), // 增加最大迭代次数，避免过早触发 final call
+			agent.WithLogger(NewAgentLogger()),
 		)
 		if err != nil {
 			logger.Warn(am.ctx, "Failed to create Agent for session %s: %v", session.ID, err)
@@ -818,4 +822,38 @@ func (am *AgentManager) Stop() {
 	}
 
 	am.cancel()
+}
+
+type AgentLogger struct {
+	logger logger.Logger
+}
+
+func NewAgentLogger() *AgentLogger {
+	return &AgentLogger{
+		logger: logger.GetDefaultLogger(),
+	}
+}
+
+func (al *AgentLogger) fieldsToString(fields map[string]interface{}) string {
+	fieldStr := ""
+	for k, v := range fields {
+		fieldStr += fmt.Sprintf("%s=%v ", k, v)
+	}
+	return fieldStr
+}
+
+func (al *AgentLogger) Info(ctx context.Context, msg string, fields map[string]interface{}) {
+	al.logger.Info(ctx, "%s %s", msg, al.fieldsToString(fields))
+}
+
+func (al *AgentLogger) Warn(ctx context.Context, msg string, fields map[string]interface{}) {
+	al.logger.Warn(ctx, "%s %s", msg, al.fieldsToString(fields))
+}
+
+func (al *AgentLogger) Error(ctx context.Context, msg string, fields map[string]interface{}) {
+	al.logger.Error(ctx, "%s %s", msg, al.fieldsToString(fields))
+}
+
+func (al *AgentLogger) Debug(ctx context.Context, msg string, fields map[string]interface{}) {
+	al.logger.Debug(ctx, "%s %s", msg, al.fieldsToString(fields))
 }

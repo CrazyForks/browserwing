@@ -402,26 +402,37 @@ func (m *Manager) OpenPage(url string, language string) error {
 	}
 
 	// 设置窗口最大化，确保内容充满浏览器
-	page = page.MustWindowMaximize()
-	logger.Info(ctx, "Window maximized")
+	// page = page.MustWindowMaximize()
+	// logger.Info(ctx, "Window maximized")
 
-	// 获取窗口实际尺寸并设置Viewport
-	windowInfo, evalErr := page.Eval(`() => ({
-		width: window.innerWidth,
-		height: window.innerHeight
-	})`)
-	if evalErr == nil && windowInfo != nil {
-		if info, ok := windowInfo.Value.Val().(map[string]interface{}); ok {
-			width := int(info["width"].(float64))
-			height := int(info["height"].(float64))
-			page = page.MustSetViewport(width, height, 1, false)
-			logger.Info(ctx, "Viewport set to window size: %dx%d", width, height)
-		}
-	} else {
-		// 如果获取失败，使用默认值
-		page = page.MustSetViewport(1920, 1080, 1, false)
-		logger.Info(ctx, "Viewport set to default: 1920x1080")
-	}
+	// // 获取窗口实际尺寸并设置Viewport
+	// windowInfo, evalErr := page.Eval(`() => ({
+	// 	width: window.innerWidth,
+	// 	height: window.innerHeight
+	// })`)
+	// if evalErr == nil && windowInfo != nil {
+	// 	if info, ok := windowInfo.Value.Val().(map[string]interface{}); ok {
+	// 		width := int(info["width"].(float64))
+	// 		height := int(info["height"].(float64))
+	// 		page = page.MustSetViewport(width, height, 1, false)
+	// 		logger.Info(ctx, "Viewport set to window size: %dx%d", width, height)
+	// 	}
+	// } else {
+	// 	// 如果获取失败，使用默认值
+	// 	page = page.MustSetViewport(1920, 1080, 1, false)
+	// 	logger.Info(ctx, "Viewport set to default: 1920x1080")
+	// }
+
+	// 设置浏览器窗口（外壳）
+	page.MustSetWindow(0, 0, 1400, 900)
+
+	// 设置页面 viewport（CSS 布局尺寸）
+	page.MustSetViewport(
+		1280,  // width
+		800,   // height
+		1,     // deviceScaleFactor
+		false, // desktop
+	)
 
 	// 设置 User Agent
 	userAgent := config.UserAgent
@@ -645,27 +656,38 @@ func (m *Manager) PlayScript(ctx context.Context, script *models.Script) (*model
 		logger.Info(ctx, "Replay not using Stealth mode")
 	}
 
-	// 设置窗口最大化，确保内容充满浏览器
-	page = page.MustWindowMaximize()
-	logger.Info(ctx, "Replay window maximized")
+	// // 设置窗口最大化，确保内容充满浏览器
+	// page = page.MustWindowMaximize()
+	// logger.Info(ctx, "Replay window maximized")
 
-	// 获取窗口实际尺寸并设置Viewport
-	windowInfo, evalErr := page.Eval(`() => ({
-		width: window.screen.availWidth,
-		height: window.screen.availHeight
-	})`)
-	if evalErr == nil && windowInfo != nil {
-		if info, ok := windowInfo.Value.Val().(map[string]interface{}); ok {
-			width := int(info["width"].(float64))
-			height := int(info["height"].(float64))
-			page = page.MustSetViewport(width, height, 1, false)
-			logger.Info(ctx, "Replay viewport set to window size: %dx%d", width, height)
-		}
-	} else {
-		// 如果获取失败，使用默认值
-		page = page.MustSetViewport(1920, 1080, 1, false)
-		logger.Info(ctx, "Replay viewport set to default: 1920x1080")
-	}
+	// // 获取窗口实际尺寸并设置Viewport
+	// windowInfo, evalErr := page.Eval(`() => ({
+	// 	width: window.innerWidth,
+	// 	height: window.innerHeight
+	// })`)
+	// if evalErr == nil && windowInfo != nil {
+	// 	if info, ok := windowInfo.Value.Val().(map[string]interface{}); ok {
+	// 		width := int(info["width"].(float64))
+	// 		height := int(info["height"].(float64))
+	// 		page = page.MustSetViewport(width, height, 1, false)
+	// 		logger.Info(ctx, "Replay viewport set to window size: %dx%d", width, height)
+	// 	}
+	// } else {
+	// 	// 如果获取失败，使用默认值
+	// 	page = page.MustSetViewport(1920, 1080, 1, false)
+	// 	logger.Info(ctx, "Replay viewport set to default: 1920x1080")
+	// }
+
+	// 设置浏览器窗口（外壳）
+	page.MustSetWindow(0, 0, 1400, 900)
+
+	// 设置页面 viewport（CSS 布局尺寸）
+	page.MustSetViewport(
+		1280,  // width
+		800,   // height
+		1,     // deviceScaleFactor
+		false, // desktop
+	)	
 
 	// 设置 User Agent
 	userAgent := config.UserAgent

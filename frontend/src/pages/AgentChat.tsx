@@ -532,9 +532,10 @@ export default function AgentChat() {
                                 className="text-base"
                               />
                             ) : isStreaming ? (
-                              <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                                <span className="text-base italic">{t('agentChat.thinking')}</span>
+                                <div className="flex items-center gap-1.5 p-3">
+                                  <span className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1.4s' }}></span>
+                                  <span className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '200ms', animationDuration: '1.4s' }}></span>
+                                  <span className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '400ms', animationDuration: '1.4s' }}></span>
                               </div>
                             ) : null
                           ) : (
