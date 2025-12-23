@@ -66,6 +66,12 @@ func GetPresetToolsMetadata() []models.PresetToolMetadata {
 			Description: "Execute Python code locally",
 			Parameters:  []models.PresetToolParameterSchema{},
 		},
+		{
+			ID:          "webfetch",
+			Name:        "Web Fetch",
+			Description: "Fetch a web page and convert it to specified format (html or markdown)",
+			Parameters:  []models.PresetToolParameterSchema{},
+		},
 	}
 }
 
@@ -99,16 +105,16 @@ func InitPresetTools(ctx context.Context, toolReg *tools.Registry, db *storage.B
 		return &BarkTool{APIKey: getStringParam(params, "api_key", "")}
 	})
 
-	registerToolIfEnabled(toolReg, "websearch", configMap, func(params map[string]interface{}) interfaces.Tool {
-		return &WebSearchTool{}
-	})
-
 	registerToolIfEnabled(toolReg, "git", configMap, func(params map[string]interface{}) interfaces.Tool {
 		return &GitTool{DefaultWorkDir: getStringParam(params, "default_workdir", "./")}
 	})
 
 	registerToolIfEnabled(toolReg, "pyexec", configMap, func(params map[string]interface{}) interfaces.Tool {
 		return &PyExecTool{}
+	})
+
+	registerToolIfEnabled(toolReg, "webfetch", configMap, func(params map[string]interface{}) interfaces.Tool {
+		return &WebFetchTool{}
 	})
 
 	return nil

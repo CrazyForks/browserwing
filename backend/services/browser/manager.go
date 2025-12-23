@@ -249,6 +249,33 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	}
 
+	downloadPath := "./downloads"
+	// 获取绝对路径
+	absDownloadPath, err := os.Getwd()
+	if err == nil {
+		downloadPath = absDownloadPath + "/downloads"
+	}
+	// 判断文件夹是否存在，不存在则创建
+	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
+		err := os.MkdirAll(downloadPath, 0o755)
+		if err != nil {
+			logger.Warn(ctx, "Failed to create download directory: %v", err)
+		} else {
+			logger.Info(ctx, "Download directory created: %s", downloadPath)
+		}
+	}
+
+	downloadBehavior := &proto.BrowserSetDownloadBehavior{
+		Behavior:     proto.BrowserSetDownloadBehaviorBehaviorAllow,
+		DownloadPath: downloadPath, // ⚠ 必须是已存在目录
+	}
+	err = downloadBehavior.Call(browser)
+	if err != nil {
+		logger.Warn(ctx, "Failed to set download behavior: %v", err)
+	} else {
+		logger.Info(ctx, "Download behavior set: %s, path: %s", downloadBehavior.Behavior, downloadBehavior.DownloadPath)
+	}
+
 	m.launcher = l
 	m.browser = browser
 	m.isRunning = true
@@ -687,7 +714,7 @@ func (m *Manager) PlayScript(ctx context.Context, script *models.Script) (*model
 		800,   // height
 		1,     // deviceScaleFactor
 		false, // desktop
-	)	
+	)
 
 	// 设置 User Agent
 	userAgent := config.UserAgent
