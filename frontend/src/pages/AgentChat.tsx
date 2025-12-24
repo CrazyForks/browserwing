@@ -65,6 +65,23 @@ export default function AgentChat() {
     scrollToBottom()
   }, [currentSession?.messages])
 
+  // 自动调整输入框高度
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    // 重置高度以获取正确的 scrollHeight
+    textarea.style.height = 'auto'
+    
+    // 计算新高度：最小1行，最大10行
+    const lineHeight = 24 // leading-6 对应 24px
+    const minHeight = lineHeight * 1 // 1行
+    const maxHeight = lineHeight * 10 // 10行
+    const newHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)
+    
+    textarea.style.height = `${newHeight}px`
+  }, [inputMessage])
+
   // 加载会话列表
   const loadSessions = async () => {
     try {
@@ -458,6 +475,41 @@ export default function AgentChat() {
         </div>
 
         <div className="flex items-center gap-4">
+          {/* LLM 选择下拉框 */}
+          <div className="relative" ref={llmDropdownRef}>
+            <button
+              onClick={() => setShowLlmDropdown(!showLlmDropdown)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
+              disabled={isStreaming}
+            >
+              <Bot className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+              <span className="text-gray-700 dark:text-gray-300">
+                {llmConfigs.find(c => c.id === selectedLlm)?.model || t('agentChat.selectModel')}
+              </span>
+              <ChevronDown className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+            </button>
+
+            {showLlmDropdown && (
+              <div className="absolute top-full mt-2 right-0 w-64 bg-white dark:bg-gray-700 rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 py-1 z-50 max-h-64 overflow-y-auto">
+                {llmConfigs.filter(c => c.is_active).map(config => (
+                  <button
+                    key={config.id}
+                    onClick={() => {
+                      setSelectedLlm(config.id)
+                      setShowLlmDropdown(false)
+                    }}
+                    className={`w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors ${
+                      selectedLlm === config.id ? 'bg-gray-100 dark:bg-gray-600' : ''
+                    }`}
+                  >
+                    <div className="font-medium text-gray-900 dark:text-gray-100">{config.model}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{config.provider}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          
           {/* MCP 状态 */}
           {mcpStatus && (
             <button
@@ -580,7 +632,7 @@ export default function AgentChat() {
                         {message.role === 'assistant' && message.content && (
                           <button
                             onClick={() => copyMessage(message.content, message.id)}
-                            className="absolute -bottom-2 right-2 opacity-0 group-hover:opacity-100 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition-all shadow-sm"
+                            className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition-opacity shadow-sm"
                             title={t('agentChat.copyMessage')}
                           >
                             {copiedMessageId === message.id ? (
@@ -599,60 +651,26 @@ export default function AgentChat() {
               </div>
 
               {/* 输入区域 - 固定在底部 */}
-              <div className="px-6 py-3 bg-white dark:bg-gray-800 flex-shrink-0">
+              <div className="px-6 py-3 bg-white dark:bg-gray-800 flex-shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] dark:shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.3)]">
                 <div className="max-w-8xl mx-auto">
-                  <div className="flex items-center gap-3">
-                    {/* LLM 选择下拉框 */}
-                    <div className="relative" ref={llmDropdownRef}>
-                      <button
-                        onClick={() => setShowLlmDropdown(!showLlmDropdown)}
-                        className="flex items-center gap-2 px-3 h-[56px] bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm whitespace-nowrap"
-                        disabled={isStreaming}
-                      >
-                        <Bot className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                        <span className="text-gray-700 dark:text-gray-300 dark:text-gray-300">
-                          {llmConfigs.find(c => c.id === selectedLlm)?.model || t('agentChat.selectModel')}
-                        </span>
-                        <ChevronDown className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                      </button>
-
-                      {showLlmDropdown && (
-                        <div className="absolute bottom-full mb-2 left-0 w-64 bg-white dark:bg-gray-700 rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 py-1 z-50 max-h-64 overflow-y-auto">
-                          {llmConfigs.filter(c => c.is_active).map(config => (
-                            <button
-                              key={config.id}
-                              onClick={() => {
-                                setSelectedLlm(config.id)
-                                setShowLlmDropdown(false)
-                              }}
-                              className={`w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors ${
-                                selectedLlm === config.id ? 'bg-gray-100 dark:bg-gray-600' : ''
-                              }`}
-                            >
-                              <div className="font-medium text-gray-900 dark:text-gray-100">{config.model}</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400">{config.provider}</div>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
+                  <div className="flex items-end gap-3">
                     {/* 输入框 */}
-                    <div className="flex-1 flex items-center gap-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-2xl px-4 py-2">
+                    <div className="flex-1 flex items-end gap-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-2xl px-4 py-2">
                       <textarea
                         ref={textareaRef}
                         value={inputMessage}
                         onChange={(e) => setInputMessage(e.target.value)}
                         onKeyPress={handleKeyPress}
                         placeholder={t('agentChat.inputPlaceholder')}
-                        className="flex-1 bg-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 resize-none outline-none max-h-32 py-2 leading-6 text-base"
+                        className="flex-1 bg-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 resize-none outline-none py-2 leading-6 text-base overflow-y-auto"
                         rows={1}
+                        style={{ minHeight: '24px', maxHeight: '240px' }}
                         disabled={isStreaming}
                       />
                       <button
                         onClick={isStreaming ? stopGeneration : sendMessage}
                         disabled={!isStreaming && !inputMessage.trim()}
-                        className="flex-shrink-0 p-2 bg-gray-900 dark:bg-gray-700 text-white rounded-xl hover:bg-gray-800 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="flex-shrink-0 p-2 bg-gray-900 dark:bg-gray-700 text-white rounded-xl hover:bg-gray-800 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors mb-1"
                         title={isStreaming ? t('agentChat.stopGeneration') : t('agentChat.send')}
                       >
                         {isStreaming ? (
