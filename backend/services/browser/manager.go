@@ -42,8 +42,10 @@ type Manager struct {
 	siteConfigs            []*models.BrowserConfig // 网站特定配置列表
 	lastRecordedActions    []models.ScriptAction   // 最后一次录制的动作(用于页面内停止录制)
 	lastRecordedStartURL   string                  // 最后一次录制的起始URL(用于页面内停止录制)
+	lastDownloadedFiles    []models.DownloadedFile // 最后一次录制下载的文件(用于页面内停止录制)
 	inPageRecordingStopped bool                    // 标记是否是页面内停止的录制
 	currentLanguage        string                  // 当前前端语言设置
+	downloadPath           string                  // 下载目录路径
 }
 
 // NewManager 创建浏览器管理器
@@ -275,6 +277,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	} else {
 		logger.Info(ctx, "Download behavior set: %s, path: %s", downloadBehavior.Behavior, downloadBehavior.DownloadPath)
 	}
+
+	// 保存下载路径到 Manager 和 Recorder
+	m.downloadPath = downloadPath
+	m.recorder.SetDownloadPath(downloadPath)
 
 	// 授予剪贴板权限，避免粘贴时弹出权限请求
 	grantPermissions := &proto.BrowserGrantPermissions{
@@ -652,11 +658,19 @@ func (m *Manager) StartRecording(ctx context.Context) error {
 }
 
 // StopRecording 停止录制
-func (m *Manager) StopRecording(ctx context.Context) ([]models.ScriptAction, error) {
+func (m *Manager) StopRecording(ctx context.Context) ([]models.ScriptAction, []models.DownloadedFile, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.recorder.StopRecording(ctx)
+	actions, err := m.recorder.StopRecording(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// 获取下载文件信息
+	downloadedFiles := m.recorder.GetDownloadedFiles()
+
+	return actions, downloadedFiles, nil
 }
 
 // IsRecording 检查是否正在录制
@@ -674,6 +688,7 @@ func (m *Manager) GetRecordingInfo() map[string]interface{} {
 		info["in_page_stopped"] = true
 		info["actions"] = m.lastRecordedActions
 		info["count"] = len(m.lastRecordedActions)
+		info["downloaded_files"] = m.lastDownloadedFiles
 		// 使用持久化的start_url
 		if m.lastRecordedStartURL != "" {
 			info["start_url"] = m.lastRecordedStartURL
@@ -691,6 +706,7 @@ func (m *Manager) ClearInPageRecordingState() {
 	m.inPageRecordingStopped = false
 	m.lastRecordedActions = nil
 	m.lastRecordedStartURL = ""
+	m.lastDownloadedFiles = nil
 	m.mu.Unlock()
 } // PlayScript 回放脚本
 func (m *Manager) PlayScript(ctx context.Context, script *models.Script) (*models.PlayResult, error) {
@@ -932,15 +948,19 @@ func (m *Manager) checkInPageRecordingRequests(ctx context.Context, page *rod.Pa
 				// 获取录制信息(包含start_url)
 				recInfo := m.recorder.GetRecordingInfo()
 
-				// 停止录制
+				// 停止录制并获取下载文件信息
 				actions, err := m.recorder.StopRecording(ctx)
+				downloadedFiles := m.recorder.GetDownloadedFiles()
+
 				if err != nil {
 					logger.Error(ctx, "Failed to stop recording from in-page request: %v", err)
 				} else {
-					logger.Info(ctx, "✓ Recording stopped from in-page button, %d actions recorded", len(actions))
-					// 保存录制结果和URL,供前端获取
+					logger.Info(ctx, "✓ Recording stopped from in-page button, %d actions recorded, %d files downloaded",
+						len(actions), len(downloadedFiles))
+					// 保存录制结果、下载文件和URL,供前端获取
 					m.mu.Lock()
 					m.lastRecordedActions = actions
+					m.lastDownloadedFiles = downloadedFiles
 					m.inPageRecordingStopped = true
 					// 保存录制时的URL到持久化字段
 					if startURL, ok := recInfo["start_url"].(string); ok && startURL != "" {

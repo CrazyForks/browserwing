@@ -272,16 +272,17 @@ func (h *Handler) StartRecording(c *gin.Context) {
 
 // StopRecording 停止录制
 func (h *Handler) StopRecording(c *gin.Context) {
-	actions, err := h.browserManager.StopRecording(c.Request.Context())
+	actions, downloadedFiles, err := h.browserManager.StopRecording(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.stopRecordingFailed"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "success.recordingStopped",
-		"actions": actions,
-		"count":   len(actions),
+		"message":          "success.recordingStopped",
+		"actions":          actions,
+		"count":            len(actions),
+		"downloaded_files": downloadedFiles,
 	})
 }
 
@@ -300,16 +301,17 @@ func (h *Handler) ClearInPageRecordingState(c *gin.Context) {
 // SaveScript 保存脚本
 func (h *Handler) SaveScript(c *gin.Context) {
 	var req struct {
-		ID                    string                 `json:"id"` // 可选，更新时使用
-		Name                  string                 `json:"name" binding:"required"`
-		Description           string                 `json:"description"`
-		URL                   string                 `json:"url" binding:"required"`
-		Actions               []models.ScriptAction  `json:"actions" binding:"required"`
-		Tags                  []string               `json:"tags"`
-		IsMCPCommand          *bool                  `json:"is_mcp_command"`
-		MCPCommandName        string                 `json:"mcp_command_name"`
-		MCPCommandDescription string                 `json:"mcp_command_description"`
-		MCPInputSchema        map[string]interface{} `json:"mcp_input_schema"`
+		ID                    string                  `json:"id"` // 可选，更新时使用
+		Name                  string                  `json:"name" binding:"required"`
+		Description           string                  `json:"description"`
+		URL                   string                  `json:"url" binding:"required"`
+		Actions               []models.ScriptAction   `json:"actions" binding:"required"`
+		DownloadedFiles       []models.DownloadedFile `json:"downloaded_files"` // 下载的文件列表
+		Tags                  []string                `json:"tags"`
+		IsMCPCommand          *bool                   `json:"is_mcp_command"`
+		MCPCommandName        string                  `json:"mcp_command_name"`
+		MCPCommandDescription string                  `json:"mcp_command_description"`
+		MCPInputSchema        map[string]interface{}  `json:"mcp_input_schema"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -329,15 +331,16 @@ func (h *Handler) SaveScript(c *gin.Context) {
 	}
 
 	script := &models.Script{
-		ID:          id,
-		Name:        req.Name,
-		Description: req.Description,
-		URL:         req.URL,
-		Actions:     req.Actions,
-		Tags:        req.Tags,
-		Duration:    duration,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:              id,
+		Name:            req.Name,
+		Description:     req.Description,
+		URL:             req.URL,
+		Actions:         req.Actions,
+		DownloadedFiles: req.DownloadedFiles, // 保存下载文件信息
+		Tags:            req.Tags,
+		Duration:        duration,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 
 	// 如果提供了 MCP 相关字段，则设置

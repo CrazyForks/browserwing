@@ -4,6 +4,16 @@ import (
 	"time"
 )
 
+// DownloadedFile 下载的文件信息
+type DownloadedFile struct {
+	FileName     string    `json:"file_name"`     // 文件名
+	FilePath     string    `json:"file_path"`     // 完整文件路径
+	URL          string    `json:"url"`           // 下载URL
+	MimeType     string    `json:"mime_type"`     // MIME类型
+	Size         int64     `json:"size"`          // 文件大小（字节）
+	DownloadTime time.Time `json:"download_time"` // 下载时间
+}
+
 // ScriptAction 脚本操作步骤
 type ScriptAction struct {
 	Type      string            `json:"type"`      // click, input, select, navigate, wait, sleep, extract_text, extract_attribute, extract_html, execute_js, upload_file, scroll, keyboard, open_tab, switch_tab
@@ -55,6 +65,9 @@ type Script struct {
 	Duration    int64          `json:"duration"`    // 录制时长（毫秒）
 	CanPublish  bool           `json:"can_publish"` // 是否可作为发布器使用
 	CanFetch    bool           `json:"can_fetch"`   // 是否可作为抓取器使用
+
+	// 下载文件信息
+	DownloadedFiles []DownloadedFile `json:"downloaded_files,omitempty"` // 录制过程中下载的文件列表
 
 	// MCP 相关字段
 	IsMCPCommand          bool                   `json:"is_mcp_command"`          // 是否作为 MCP 命令对外提供

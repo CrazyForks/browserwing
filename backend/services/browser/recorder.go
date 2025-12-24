@@ -38,9 +38,12 @@ type Recorder struct {
 	syncTicker      *time.Ticker
 	syncStopChan    chan bool
 	lastSyncedCount int
-	apiServerPort   string       // API 服务器端口
-	llmManager      *llm.Manager // LLM 管理器
-	language        string       // 当前语言设置
+	apiServerPort   string                  // API 服务器端口
+	llmManager      *llm.Manager            // LLM 管理器
+	language        string                  // 当前语言设置
+	downloadedFiles []models.DownloadedFile // 录制过程中下载的文件
+	downloadPath    string                  // 下载目录路径
+	downloadCancel  context.CancelFunc      // 取消下载监听
 }
 
 // NewRecorder 创建录制器
@@ -87,6 +90,7 @@ func (r *Recorder) StartRecording(ctx context.Context, page *rod.Page, url strin
 	r.actions = make([]models.ScriptAction, 0)
 	r.page = page
 	r.pages = make(map[string]*rod.Page)
+	r.downloadedFiles = make([]models.DownloadedFile, 0)
 
 	// 添加主页面到 pages map
 	pageInfo := page.MustInfo()
@@ -204,6 +208,9 @@ func (r *Recorder) StartRecording(ctx context.Context, page *rod.Page, url strin
 	r.lastSyncedCount = 0
 
 	go r.syncActionsFromBrowser(ctx)
+
+	// 启动下载事件监听
+	go r.watchDownloadEvents(ctx, page)
 
 	return nil
 }
@@ -492,6 +499,12 @@ func (r *Recorder) StopRecording(ctx context.Context) ([]models.ScriptAction, er
 		close(r.syncStopChan)
 	}
 
+	// 停止下载监听
+	if r.downloadCancel != nil {
+		r.downloadCancel()
+		r.downloadCancel = nil
+	}
+
 	// 最后一次同步：从所有页面获取录制的操作
 	logger.Info(ctx, "Performing final sync from all pages...")
 	allActions := make([]models.ScriptAction, 0)
@@ -633,8 +646,17 @@ func (r *Recorder) StopRecording(ctx context.Context) ([]models.ScriptAction, er
 
 	r.isRecording = false
 	actions := r.actions
+	downloadedFiles := r.downloadedFiles
 	r.page = nil
 	r.pages = make(map[string]*rod.Page)
+	r.downloadedFiles = nil
+
+	if len(downloadedFiles) > 0 {
+		logger.Info(ctx, "Recorded %d file downloads during recording", len(downloadedFiles))
+		for i, file := range downloadedFiles {
+			logger.Info(ctx, "  [%d] %s -> %s", i+1, file.FileName, file.FilePath)
+		}
+	}
 
 	logger.Info(ctx, "Final return of %d actions", len(actions))
 
@@ -996,6 +1018,89 @@ func (r *Recorder) injectRecordingScriptToPage(ctx context.Context, page *rod.Pa
 
 	// 监听新页面的导航事件
 	go r.watchForPageNavigation(ctx, page)
+}
+
+// watchDownloadEvents 监听下载事件并记录下载的文件信息
+func (r *Recorder) watchDownloadEvents(ctx context.Context, page *rod.Page) {
+	// 创建可取消的上下文
+	downloadCtx, cancel := context.WithCancel(ctx)
+	r.downloadCancel = cancel
+
+	// 获取浏览器实例
+	browser := page.Browser()
+
+	logger.Info(ctx, "Started watching for download events...")
+
+	// 监听下载开始事件
+	go browser.Context(downloadCtx).EachEvent(func(e *proto.BrowserDownloadWillBegin) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+
+		if !r.isRecording {
+			return
+		}
+
+		// 记录下载文件信息
+		downloadFile := models.DownloadedFile{
+			FileName:     e.SuggestedFilename,
+			URL:          e.URL,
+			DownloadTime: time.Now(),
+		}
+
+		// 如果有下载路径配置，构建完整的文件路径
+		if r.downloadPath != "" {
+			downloadFile.FilePath = r.downloadPath + "/" + e.SuggestedFilename
+		}
+
+		logger.Info(ctx, "📥 Download detected: %s from %s", e.SuggestedFilename, e.URL)
+
+		r.downloadedFiles = append(r.downloadedFiles, downloadFile)
+	})()
+
+	// 监听下载进度事件（可选，用于获取更多信息如文件大小）
+	go browser.Context(downloadCtx).EachEvent(func(e *proto.BrowserDownloadProgress) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+
+		if !r.isRecording {
+			return
+		}
+
+		// 如果下载完成，更新文件大小信息
+		if e.State == proto.BrowserDownloadProgressStateCompleted {
+			// 查找对应的下载文件记录并更新
+			for i := range r.downloadedFiles {
+				if r.downloadedFiles[i].FileName == "" {
+					// 通过 GUID 匹配（如果需要更精确的匹配可以添加 GUID 字段）
+					r.downloadedFiles[i].Size = int64(e.TotalBytes)
+					logger.Info(ctx, "✓ Download completed: %s (%.2f MB)",
+						r.downloadedFiles[i].FileName,
+						float64(e.TotalBytes)/(1024*1024))
+					break
+				}
+			}
+		} else if e.State == proto.BrowserDownloadProgressStateCanceled {
+			logger.Info(ctx, "Download canceled: GUID %s", e.GUID)
+		}
+	})()
+
+	// 等待上下文取消
+	<-downloadCtx.Done()
+	logger.Info(ctx, "Stopped watching download events")
+}
+
+// SetDownloadPath 设置下载路径（从 Manager 传入）
+func (r *Recorder) SetDownloadPath(path string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.downloadPath = path
+}
+
+// GetDownloadedFiles 获取录制过程中下载的文件列表
+func (r *Recorder) GetDownloadedFiles() []models.DownloadedFile {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.downloadedFiles
 }
 
 // isValidRecordingURL 检查URL是否是有效的录制目标
