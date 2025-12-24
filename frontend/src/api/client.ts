@@ -626,7 +626,8 @@ export const api = {
   updateRecordingConfig: (config: RecordingConfig) => client.put('/recording-config', config),
 
   // 工具配置相关
-  listToolConfigs: () => client.get<ToolConfigResponse[]>('/tool-configs'),
+  listToolConfigs: (params?: { page?: number; page_size?: number; search?: string; type?: string }) =>
+    client.get<{ data: ToolConfigResponse[]; total: number; page: number; page_size: number }>('/tool-configs', { params }),
   getToolConfig: (id: string) => client.get<ToolConfig>(`/tool-configs/${id}`),
   updateToolConfig: (id: string, data: { enabled?: boolean; parameters?: Record<string, any> }) =>
     client.put<ToolConfig>(`/tool-configs/${id}`, data),

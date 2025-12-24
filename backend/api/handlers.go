@@ -1544,6 +1544,24 @@ func (h *Handler) syncMCPRegistration(ctx context.Context, script *models.Script
 
 // ListToolConfigs 列出所有工具配置
 func (h *Handler) ListToolConfigs(c *gin.Context) {
+	// 获取分页参数
+	page := 1
+	pageSize := 20
+	if pageStr := c.Query("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if pageSizeStr := c.Query("page_size"); pageSizeStr != "" {
+		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 100 {
+			pageSize = ps
+		}
+	}
+
+	// 获取搜索和过滤参数
+	searchQuery := c.Query("search")
+	toolType := c.Query("type") // 可选: preset, script
+
 	// 获取工具配置
 	toolConfigs, err := h.db.ListToolConfigs()
 	if err != nil {
@@ -1619,7 +1637,7 @@ func (h *Handler) ListToolConfigs(c *gin.Context) {
 		Script   *models.Script             `json:"script,omitempty"`   // 脚本工具关联的脚本
 	}
 
-	var response []ToolConfigResponse
+	var allTools []ToolConfigResponse
 	for _, cfg := range toolConfigs {
 		resp := ToolConfigResponse{ToolConfig: cfg}
 		if cfg.Type == models.ToolTypePreset {
@@ -1631,15 +1649,54 @@ func (h *Handler) ListToolConfigs(c *gin.Context) {
 				resp.Script = script
 			}
 		}
-		response = append(response, resp)
+		allTools = append(allTools, resp)
+	}
+
+	// 应用搜索和类型过滤
+	var filteredTools []ToolConfigResponse
+	for _, tool := range allTools {
+		// 类型过滤
+		if toolType != "" && string(tool.Type) != toolType {
+			continue
+		}
+
+		// 搜索过滤
+		if searchQuery != "" {
+			searchLower := strings.ToLower(searchQuery)
+			if !strings.Contains(strings.ToLower(tool.Name), searchLower) &&
+				!strings.Contains(strings.ToLower(tool.Description), searchLower) {
+				continue
+			}
+		}
+
+		filteredTools = append(filteredTools, tool)
+	}
+
+	total := len(filteredTools)
+
+	// 应用分页
+	start := (page - 1) * pageSize
+	end := start + pageSize
+	if start >= total {
+		filteredTools = []ToolConfigResponse{}
+	} else {
+		if end > total {
+			end = total
+		}
+		filteredTools = filteredTools[start:end]
 	}
 
 	// 确保至少返回空数组而不是 null
-	if response == nil {
-		response = []ToolConfigResponse{}
+	if filteredTools == nil {
+		filteredTools = []ToolConfigResponse{}
 	}
 
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, gin.H{
+		"data":      filteredTools,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
 }
 
 // GetToolConfig 获取单个工具配置

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Settings, RefreshCw, Wrench, FileCode } from 'lucide-react'
+import { Settings, RefreshCw, Wrench, FileCode, Search } from 'lucide-react'
 import { api, ToolConfigResponse } from '../api/client'
 import Toast from '../components/Toast'
 import { Modal } from '../components/Modal'
@@ -17,6 +17,10 @@ export default function ToolManager() {
     tool: null,
   })
   const [parameters, setParameters] = useState<Record<string, any>>({})
+  const [activeTab, setActiveTab] = useState<'script' | 'preset'>('script')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize] = useState(10)
 
   useEffect(() => {
     loadTools()
@@ -26,7 +30,7 @@ export default function ToolManager() {
     try {
       setLoading(true)
       const response = await api.listToolConfigs()
-      setTools(response.data || [])
+      setTools(response.data.data || [])
     } catch (error: any) {
       console.error('Failed to load tools:', error)
       showToast(t('error.getLLMConfigsFailed'), 'error')
@@ -85,6 +89,28 @@ export default function ToolManager() {
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type })
   }
+
+  // 过滤和分页
+  const currentTools = (tools || []).filter(t => t.type === activeTab)
+  const filteredTools = currentTools.filter(tool => {
+    if (!searchQuery) return true
+    const searchLower = searchQuery.toLowerCase()
+    return (
+      tool.name.toLowerCase().includes(searchLower) ||
+      tool.description.toLowerCase().includes(searchLower)
+    )
+  })
+
+  const totalPages = Math.ceil(filteredTools.length / pageSize)
+  const paginatedTools = filteredTools.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  )
+
+  // 当切换tab或搜索时重置到第一页
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [activeTab, searchQuery])
 
   const presetTools = (tools || []).filter(t => t.type === 'preset')
   const scriptTools = (tools || []).filter(t => t.type === 'script')
@@ -165,9 +191,9 @@ export default function ToolManager() {
   )
 
   return (
-    <div className="border border-gray-300 dark:border-gray-700">
-      {/* 顶部标题栏 */}
-      <div className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-6 py-4">
+    <div className="space-y-6 lg:space-y-8 animate-fade-in">
+      {/* Header */}
+      <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t('toolManager.title')}</h1>
@@ -182,42 +208,111 @@ export default function ToolManager() {
             {t('toolManager.syncTools')}
           </button>
         </div>
+
+        {/* Tab 导航 */}
+        <div className="border-b border-gray-200 dark:border-gray-700">
+          <div className="flex gap-8">
+            <button
+              onClick={() => setActiveTab('script')}
+              className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'script'
+                  ? 'border-gray-900 dark:border-gray-100 text-gray-900 dark:text-gray-100'
+                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+            >
+              <div className="flex items-center gap-2">
+                <FileCode className="w-4 h-4" />
+                {t('toolManager.scriptTools')} ({scriptTools.length})
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('preset')}
+              className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'preset'
+                  ? 'border-gray-900 dark:border-gray-100 text-gray-900 dark:text-gray-100'
+                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+            >
+              <div className="flex items-center gap-2">
+                <Wrench className="w-4 h-4" />
+                {t('toolManager.presetTools')} ({presetTools.length})
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* 搜索栏 */}
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t('common.search') || '搜索工具...'}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500"
+          />
+        </div>
       </div>
 
       {/* 内容区域 */}
-      <div className="p-6 bg-gray-50 dark:bg-gray-900 min-h-[calc(100vh-12rem)]">
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="text-gray-500 dark:text-gray-400">{t('common.loading')}</div>
-          </div>
-        ) : (
-          <div className="space-y-8">
-            {/* 预设工具 */}
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">{t('toolManager.presetTools')}</h2>
-              {presetTools.length === 0 ? (
-                <div className="text-center py-8 text-gray-500 dark:text-gray-400">{t('toolManager.noTools')}</div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {presetTools.map(renderToolCard)}
+      {loading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="text-gray-500 dark:text-gray-400">{t('common.loading')}</div>
+        </div>
+      ) : (
+          <>
+            {paginatedTools.length === 0 ? (
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-12 text-center">
+                <div className="text-gray-500 dark:text-gray-400">
+                  {searchQuery ? t('common.noSearchResults') || '未找到匹配的工具' : t('toolManager.noTools')}
                 </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {paginatedTools.map(renderToolCard)}
+              </div>
+            )}
 
-            {/* 脚本工具 */}
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">{t('toolManager.scriptTools')}</h2>
-              {scriptTools.length === 0 ? (
-                <div className="text-center py-8 text-gray-500 dark:text-gray-400">{t('toolManager.noTools')}</div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {scriptTools.map(renderToolCard)}
+            {/* 分页控制 */}
+            {totalPages > 1 && (
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => setCurrentPage(1)}
+                    disabled={currentPage === 1}
+                    className="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {t('common.firstPage') || '首页'}
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {t('common.previous') || '上一页'}
+                    </button>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      {currentPage} / {totalPages}
+                    </span>
+                    <button
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                      className="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {t('common.next') || '下一页'}
+                    </button>
                 </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+                  <button
+                    onClick={() => setCurrentPage(totalPages)}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {t('common.lastPage') || '末页'}
+                  </button>
+                </div>
+              </div>
+            )}
+        </>
+      )}
 
       {/* 参数配置弹窗 */}
       <Modal
