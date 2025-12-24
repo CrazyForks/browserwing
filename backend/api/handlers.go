@@ -2,12 +2,15 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
+	"github.com/Ingenimax/agent-sdk-go/pkg/mcp"
 	localtools "github.com/browserwing/browserwing/agent/tools"
 	"github.com/browserwing/browserwing/config"
 	"github.com/browserwing/browserwing/llm"
@@ -1806,4 +1809,513 @@ func (h *Handler) SyncToolConfigs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "toolManager.syncSuccess"})
+}
+
+// ============= MCP服务管理相关 API =============
+
+// ListMCPServices 列出所有MCP服务
+func (h *Handler) ListMCPServices(c *gin.Context) {
+	services, err := h.db.ListMCPServices()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.getMCPServicesFailed"})
+		return
+	}
+
+	if services == nil {
+		services = []*models.MCPService{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": services})
+}
+
+// GetMCPService 获取单个MCP服务
+func (h *Handler) GetMCPService(c *gin.Context) {
+	id := c.Param("id")
+
+	service, err := h.db.GetMCPService(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "error.mcpServiceNotFound"})
+		return
+	}
+
+	c.JSON(http.StatusOK, service)
+}
+
+// CreateMCPService 创建MCP服务
+func (h *Handler) CreateMCPService(c *gin.Context) {
+	var req models.MCPService
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(c.Request.Context(), "Failed to bind MCP service JSON: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "error.invalidParams",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// 验证必填字段
+	if req.Name == "" || req.Type == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.mcpServiceRequiredFields"})
+		return
+	}
+
+	// 根据类型验证必填字段
+	switch req.Type {
+	case models.MCPServiceTypeStdio:
+		if req.Command == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "error.mcpServiceCommandRequired"})
+			return
+		}
+	case models.MCPServiceTypeSSE, models.MCPServiceTypeHTTP:
+		if req.URL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "error.mcpServiceURLRequired"})
+			return
+		}
+	}
+
+	// 生成ID
+	req.ID = fmt.Sprintf("mcp_%d", time.Now().Unix())
+	req.CreatedAt = time.Now()
+	req.UpdatedAt = time.Now()
+	req.Status = models.MCPServiceStatusDisconnected
+	req.ToolCount = 0
+
+	if err := h.db.SaveMCPService(&req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.saveMCPServiceFailed"})
+		return
+	}
+
+	// 自动发现工具（异步执行，不阻塞响应）
+	go func() {
+		ctx := context.Background()
+		tools, err := h.discoverMCPTools(ctx, &req)
+		if err != nil {
+			logger.Warn(ctx, "Failed to auto-discover tools for MCP service %s: %v", req.Name, err)
+			req.Status = models.MCPServiceStatusError
+			req.LastError = fmt.Sprintf("Auto-discovery failed: %v", err)
+		} else {
+			req.Status = models.MCPServiceStatusConnected
+			req.ToolCount = len(tools)
+			req.LastError = ""
+			if err := h.db.SaveMCPServiceTools(req.ID, tools); err != nil {
+				logger.Error(ctx, "Failed to save discovered tools: %v", err)
+			}
+		}
+		req.UpdatedAt = time.Now()
+		h.db.SaveMCPService(&req)
+
+		// 通知Agent重新加载MCP配置
+		if h.agentManager != nil {
+			type AgentManagerInterface interface {
+				ReloadMCPServices() error
+			}
+			if am, ok := h.agentManager.(AgentManagerInterface); ok {
+				am.ReloadMCPServices()
+			}
+		}
+	}()
+
+	// 通知Agent重新加载MCP配置
+	if h.agentManager != nil {
+		type AgentManagerInterface interface {
+			ReloadMCPServices() error
+		}
+		if am, ok := h.agentManager.(AgentManagerInterface); ok {
+			if err := am.ReloadMCPServices(); err != nil {
+				logger.Warn(c.Request.Context(), "Failed to reload MCP services: %v", err)
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success.mcpServiceCreated",
+		"service": req,
+	})
+}
+
+// UpdateMCPService 更新MCP服务
+func (h *Handler) UpdateMCPService(c *gin.Context) {
+	id := c.Param("id")
+
+	var req models.MCPService
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidParams"})
+		return
+	}
+
+	// 检查服务是否存在
+	_, err := h.db.GetMCPService(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "error.mcpServiceNotFound"})
+		return
+	}
+
+	// 确保ID一致
+	req.ID = id
+	req.UpdatedAt = time.Now()
+
+	if err := h.db.SaveMCPService(&req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.updateMCPServiceFailed"})
+		return
+	}
+
+	// 自动重新发现工具（异步执行）
+	go func() {
+		ctx := context.Background()
+		tools, err := h.discoverMCPTools(ctx, &req)
+		if err != nil {
+			logger.Warn(ctx, "Failed to re-discover tools for MCP service %s: %v", req.Name, err)
+			req.Status = models.MCPServiceStatusError
+			req.LastError = fmt.Sprintf("Re-discovery failed: %v", err)
+		} else {
+			req.Status = models.MCPServiceStatusConnected
+			req.ToolCount = len(tools)
+			req.LastError = ""
+			if err := h.db.SaveMCPServiceTools(req.ID, tools); err != nil {
+				logger.Error(ctx, "Failed to save re-discovered tools: %v", err)
+			}
+		}
+		req.UpdatedAt = time.Now()
+		h.db.SaveMCPService(&req)
+
+		// 通知Agent重新加载MCP配置
+		if h.agentManager != nil {
+			type AgentManagerInterface interface {
+				ReloadMCPServices() error
+			}
+			if am, ok := h.agentManager.(AgentManagerInterface); ok {
+				am.ReloadMCPServices()
+			}
+		}
+	}()
+
+	// 通知Agent重新加载MCP配置
+	if h.agentManager != nil {
+		type AgentManagerInterface interface {
+			ReloadMCPServices() error
+		}
+		if am, ok := h.agentManager.(AgentManagerInterface); ok {
+			if err := am.ReloadMCPServices(); err != nil {
+				logger.Warn(c.Request.Context(), "Failed to reload MCP services: %v", err)
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success.mcpServiceUpdated",
+		"service": req,
+	})
+}
+
+// DeleteMCPService 删除MCP服务
+func (h *Handler) DeleteMCPService(c *gin.Context) {
+	id := c.Param("id")
+
+	if err := h.db.DeleteMCPService(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.deleteMCPServiceFailed"})
+		return
+	}
+
+	// 通知Agent重新加载MCP配置
+	if h.agentManager != nil {
+		type AgentManagerInterface interface {
+			ReloadMCPServices() error
+		}
+		if am, ok := h.agentManager.(AgentManagerInterface); ok {
+			if err := am.ReloadMCPServices(); err != nil {
+				logger.Warn(c.Request.Context(), "Failed to reload MCP services: %v", err)
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "success.mcpServiceDeleted"})
+}
+
+// ToggleMCPService 启用/禁用MCP服务
+func (h *Handler) ToggleMCPService(c *gin.Context) {
+	id := c.Param("id")
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidParams"})
+		return
+	}
+
+	service, err := h.db.GetMCPService(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "error.mcpServiceNotFound"})
+		return
+	}
+
+	service.Enabled = req.Enabled
+	service.UpdatedAt = time.Now()
+
+	if err := h.db.SaveMCPService(service); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.updateMCPServiceFailed"})
+		return
+	}
+
+	// 通知Agent重新加载MCP配置
+	if h.agentManager != nil {
+		type AgentManagerInterface interface {
+			ReloadMCPServices() error
+		}
+		if am, ok := h.agentManager.(AgentManagerInterface); ok {
+			if err := am.ReloadMCPServices(); err != nil {
+				logger.Warn(c.Request.Context(), "Failed to reload MCP services: %v", err)
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success.mcpServiceToggled",
+		"service": service,
+	})
+}
+
+// GetMCPServiceTools 获取MCP服务的工具列表
+func (h *Handler) GetMCPServiceTools(c *gin.Context) {
+	id := c.Param("id")
+
+	tools, err := h.db.GetMCPServiceTools(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.getMCPServiceToolsFailed"})
+		return
+	}
+
+	if tools == nil {
+		tools = []models.MCPDiscoveredTool{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": tools})
+}
+
+// DiscoverMCPServiceTools 发现MCP服务的工具(连接服务并获取工具列表)
+func (h *Handler) DiscoverMCPServiceTools(c *gin.Context) {
+	id := c.Param("id")
+
+	service, err := h.db.GetMCPService(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "error.mcpServiceNotFound"})
+		return
+	}
+
+	// 更新状态为连接中
+	service.Status = models.MCPServiceStatusConnecting
+	service.LastError = ""
+	h.db.SaveMCPService(service)
+
+	// 实际连接MCP服务并发现工具
+	discoveredTools, err := h.discoverMCPTools(c.Request.Context(), service)
+	if err != nil {
+		service.Status = models.MCPServiceStatusError
+		service.LastError = fmt.Sprintf("Failed to discover tools: %v", err)
+		h.db.SaveMCPService(service)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "error.discoverMCPServiceToolsFailed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// 保存发现的工具
+	if err := h.db.SaveMCPServiceTools(id, discoveredTools); err != nil {
+		service.Status = models.MCPServiceStatusError
+		service.LastError = err.Error()
+		h.db.SaveMCPService(service)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.saveMCPServiceToolsFailed"})
+		return
+	}
+
+	// 更新服务状态
+	service.Status = models.MCPServiceStatusConnected
+	service.ToolCount = len(discoveredTools)
+	service.UpdatedAt = time.Now()
+	h.db.SaveMCPService(service)
+
+	// 通知Agent重新加载MCP配置
+	if h.agentManager != nil {
+		type AgentManagerInterface interface {
+			ReloadMCPServices() error
+		}
+		if am, ok := h.agentManager.(AgentManagerInterface); ok {
+			if err := am.ReloadMCPServices(); err != nil {
+				logger.Warn(c.Request.Context(), "Failed to reload MCP services: %v", err)
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success.mcpServiceToolsDiscovered",
+		"tools":   discoveredTools,
+	})
+}
+
+// UpdateMCPServiceToolEnabled 更新单个工具的启用状态
+func (h *Handler) UpdateMCPServiceToolEnabled(c *gin.Context) {
+	id := c.Param("id")
+	toolName := c.Param("toolName")
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidParams"})
+		return
+	}
+
+	// 获取工具列表
+	tools, err := h.db.GetMCPServiceTools(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.getMCPServiceToolsFailed"})
+		return
+	}
+
+	// 查找并更新工具
+	found := false
+	for i := range tools {
+		if tools[i].Name == toolName {
+			tools[i].Enabled = req.Enabled
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "error.toolNotFound"})
+		return
+	}
+
+	// 保存更新后的工具列表
+	if err := h.db.SaveMCPServiceTools(id, tools); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.saveMCPServiceToolsFailed"})
+		return
+	}
+
+	// 通知Agent重新加载MCP配置
+	if h.agentManager != nil {
+		type AgentManagerInterface interface {
+			ReloadMCPServices() error
+		}
+		if am, ok := h.agentManager.(AgentManagerInterface); ok {
+			if err := am.ReloadMCPServices(); err != nil {
+				logger.Warn(c.Request.Context(), "Failed to reload MCP services: %v", err)
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success.mcpServiceToolUpdated",
+	})
+}
+
+// discoverMCPTools 连接MCP服务并发现工具
+func (h *Handler) discoverMCPTools(ctx context.Context, service *models.MCPService) ([]models.MCPDiscoveredTool, error) {
+	logger.Info(ctx, "Discovering tools for MCP service: %s (type: %s, url: %s)", service.Name, service.Type, service.URL)
+
+	var mcpServer interfaces.MCPServer
+	var err error
+
+	// 根据服务类型创建MCP服务器连接
+	switch service.Type {
+	case models.MCPServiceTypeStdio:
+		// 创建stdio类型的MCP服务器
+		config := mcp.StdioServerConfig{
+			Command: service.Command,
+			Args:    service.Args,
+		}
+		// 转换环境变量
+		if len(service.Env) > 0 {
+			envSlice := make([]string, 0, len(service.Env))
+			for k, v := range service.Env {
+				envSlice = append(envSlice, k+"="+v)
+			}
+			config.Env = envSlice
+		}
+
+		mcpServer, err = mcp.NewStdioServer(ctx, config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create stdio MCP server: %w", err)
+		}
+
+	case models.MCPServiceTypeSSE, models.MCPServiceTypeHTTP:
+		// 创建HTTP/SSE类型的MCP服务器
+		if service.URL == "" {
+			return nil, fmt.Errorf("%s type requires URL", service.Type)
+		}
+
+		// 根据类型设置ProtocolType
+		protocolType := mcp.StreamableHTTP
+		if service.Type == models.MCPServiceTypeSSE {
+			protocolType = mcp.SSE
+		}
+
+		config := mcp.HTTPServerConfig{
+			BaseURL:      service.URL,
+			ProtocolType: protocolType,
+		}
+
+		logger.Info(ctx, "Creating MCP HTTP server with BaseURL: %s, Path: %s, ProtocolType: %s", config.BaseURL, config.Path, config.ProtocolType)
+
+		mcpServer, err = mcp.NewHTTPServer(ctx, config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP/SSE MCP server: %w", err)
+		}
+
+	default:
+		return nil, fmt.Errorf("unsupported MCP service type: %s", service.Type)
+	}
+
+	// 确保关闭连接
+	defer func() {
+		if mcpServer != nil {
+			mcpServer.Close()
+		}
+	}()
+
+	// 初始化连接
+	if err := mcpServer.Initialize(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize MCP server: %w", err)
+	}
+
+	// 获取工具列表
+	tools, err := mcpServer.ListTools(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tools: %w", err)
+	}
+
+	// 转换为我们的工具模型
+	discoveredTools := make([]models.MCPDiscoveredTool, 0, len(tools))
+	for _, tool := range tools {
+		discoveredTool := models.MCPDiscoveredTool{
+			Name:        tool.Name,
+			Description: tool.Description,
+			Enabled:     true, // 默认启用所有发现的工具
+		}
+
+		// 保存工具的输入Schema
+		if tool.Schema != nil {
+			// 将Schema转换为map[string]interface{}
+			schemaMap, ok := tool.Schema.(map[string]interface{})
+			if ok {
+				discoveredTool.Schema = schemaMap
+			} else {
+				// 尝试JSON序列化再反序列化
+				schemaBytes, err := json.Marshal(tool.Schema)
+				if err == nil {
+					var schemaObj map[string]interface{}
+					if err := json.Unmarshal(schemaBytes, &schemaObj); err == nil {
+						discoveredTool.Schema = schemaObj
+					}
+				}
+			}
+		}
+
+		discoveredTools = append(discoveredTools, discoveredTool)
+	}
+
+	logger.Info(ctx, "Discovered %d tools from MCP service: %s", len(discoveredTools), service.Name)
+	return discoveredTools, nil
 }

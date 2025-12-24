@@ -311,6 +311,29 @@ export interface ToolConfigResponse extends ToolConfig {
   script?: Script
 }
 
+export interface MCPService {
+  id: string
+  name: string
+  description: string
+  type: 'stdio' | 'sse' | 'http'
+  command?: string
+  args?: string[]
+  url?: string
+  env?: Record<string, string>
+  enabled: boolean
+  status: 'disconnected' | 'connecting' | 'connected' | 'error'
+  tool_count: number
+  last_error?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface MCPDiscoveredTool {
+  name: string
+  description: string
+  enabled: boolean
+  schema: Record<string, any>
+}
 
 export interface Task {
   id: string
@@ -632,6 +655,23 @@ export const api = {
   updateToolConfig: (id: string, data: { enabled?: boolean; parameters?: Record<string, any> }) =>
     client.put<ToolConfig>(`/tool-configs/${id}`, data),
   syncToolConfigs: () => client.post<{ message: string }>('/tool-configs/sync'),
+
+  // MCP服务相关
+  listMCPServices: () => client.get<{ data: MCPService[] }>('/mcp-services'),
+  getMCPService: (id: string) => client.get<MCPService>(`/mcp-services/${id}`),
+  createMCPService: (data: Partial<MCPService>) =>
+    client.post<{ message: string; service: MCPService }>('/mcp-services', data),
+  updateMCPService: (id: string, data: Partial<MCPService>) =>
+    client.put<{ message: string; service: MCPService }>(`/mcp-services/${id}`, data),
+  deleteMCPService: (id: string) => client.delete<{ message: string }>(`/mcp-services/${id}`),
+  toggleMCPService: (id: string, enabled: boolean) =>
+    client.post<{ message: string; service: MCPService }>(`/mcp-services/${id}/toggle`, { enabled }),
+  getMCPServiceTools: (id: string) =>
+    client.get<{ data: MCPDiscoveredTool[] }>(`/mcp-services/${id}/tools`),
+  discoverMCPServiceTools: (id: string) =>
+    client.post<{ message: string; tools: MCPDiscoveredTool[] }>(`/mcp-services/${id}/discover`),
+  updateMCPServiceToolEnabled: (id: string, toolName: string, enabled: boolean) =>
+    client.put<{ message: string }>(`/mcp-services/${id}/tools/${toolName}`, { enabled }),
 
   // 通用请求方法
   request: <T = any>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, data?: any) => {

@@ -23,6 +23,7 @@ var (
 	agentSessionsBucket    = []byte("agent_sessions")
 	agentMessagesBucket    = []byte("agent_messages")
 	toolConfigsBucket      = []byte("tool_configs")
+	mcpServicesBucket      = []byte("mcp_services")
 )
 
 type BoltDB struct {
@@ -79,6 +80,10 @@ func NewBoltDB(dbPath string) (*BoltDB, error) {
 			return err
 		}
 		_, err = tx.CreateBucketIfNotExists(toolConfigsBucket)
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists(mcpServicesBucket)
 		return err
 	})
 	if err != nil {
@@ -936,4 +941,134 @@ func (b *BoltDB) DeleteToolConfigByScriptID(scriptID string) error {
 		}
 		return nil
 	})
+}
+
+// ============= MCP服务相关方法 =============
+
+// SaveMCPService 保存MCP服务配置
+func (b *BoltDB) SaveMCPService(service *models.MCPService) error {
+	service.UpdatedAt = time.Now()
+	if service.CreatedAt.IsZero() {
+		service.CreatedAt = time.Now()
+	}
+
+	return b.db.Update(func(tx *bolt.Tx) error {
+bucket := tx.Bucket(mcpServicesBucket)
+data, err := json.Marshal(service)
+if err != nil {
+return err
+}
+return bucket.Put([]byte(service.ID), data)
+})
+}
+
+// GetMCPService 获取MCP服务配置
+func (b *BoltDB) GetMCPService(id string) (*models.MCPService, error) {
+	var service models.MCPService
+	err := b.db.View(func(tx *bolt.Tx) error {
+bucket := tx.Bucket(mcpServicesBucket)
+data := bucket.Get([]byte(id))
+if data == nil {
+return fmt.Errorf("mcp service not found: %s", id)
+}
+return json.Unmarshal(data, &service)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &service, nil
+}
+
+// ListMCPServices 列出所有MCP服务配置
+func (b *BoltDB) ListMCPServices() ([]*models.MCPService, error) {
+	var services []*models.MCPService
+	err := b.db.View(func(tx *bolt.Tx) error {
+bucket := tx.Bucket(mcpServicesBucket)
+return bucket.ForEach(func(k, v []byte) error {
+var service models.MCPService
+if err := json.Unmarshal(v, &service); err != nil {
+				return nil // 跳过无效数据
+			}
+			services = append(services, &service)
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// 按名称排序
+	sort.Slice(services, func(i, j int) bool {
+return services[i].Name < services[j].Name
+	})
+
+	return services, nil
+}
+
+// DeleteMCPService 删除MCP服务配置
+func (b *BoltDB) DeleteMCPService(id string) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+bucket := tx.Bucket(mcpServicesBucket)
+return bucket.Delete([]byte(id))
+})
+}
+
+// SaveMCPServiceTools 保存MCP服务发现的工具列表
+func (b *BoltDB) SaveMCPServiceTools(serviceID string, tools []models.MCPDiscoveredTool) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+bucket := tx.Bucket(mcpServicesBucket)
+
+// 先获取现有服务
+data := bucket.Get([]byte(serviceID))
+if data == nil {
+return fmt.Errorf("mcp service not found: %s", serviceID)
+}
+
+var service models.MCPService
+if err := json.Unmarshal(data, &service); err != nil {
+			return err
+		}
+		
+		// 更新工具数量和状态
+		service.ToolCount = len(tools)
+		service.UpdatedAt = time.Now()
+		
+		// 保存服务
+		newData, err := json.Marshal(&service)
+		if err != nil {
+			return err
+		}
+		
+		// 保存工具列表到单独的key
+		toolsKey := []byte(serviceID + "_tools")
+		toolsData, err := json.Marshal(tools)
+		if err != nil {
+			return err
+		}
+		
+		if err := bucket.Put(toolsKey, toolsData); err != nil {
+			return err
+		}
+		
+		return bucket.Put([]byte(serviceID), newData)
+	})
+}
+
+// GetMCPServiceTools 获取MCP服务的工具列表
+func (b *BoltDB) GetMCPServiceTools(serviceID string) ([]models.MCPDiscoveredTool, error) {
+	var tools []models.MCPDiscoveredTool
+	err := b.db.View(func(tx *bolt.Tx) error {
+bucket := tx.Bucket(mcpServicesBucket)
+toolsKey := []byte(serviceID + "_tools")
+data := bucket.Get(toolsKey)
+if data == nil {
+// 如果没有找到工具数据,返回空列表而不是错误
+return nil
+}
+return json.Unmarshal(data, &tools)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return tools, nil
 }

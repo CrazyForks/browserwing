@@ -434,10 +434,18 @@ func (am *AgentManager) loadSessionsFromDB() error {
 		if am.llmClient != nil {
 			mem := memory.NewConversationBuffer()
 
+			// 获取LazyMCP配置
+			lazyMCPConfigs, err := am.GetLazyMCPConfigs()
+			if err != nil {
+				logger.Warn(am.ctx, "Failed to get lazy MCP configs: %v", err)
+				lazyMCPConfigs = []agent.LazyMCPConfig{}
+			}
+
 			ag, err := agent.NewAgent(
 				agent.WithLLM(am.llmClient),
 				agent.WithMemory(mem),
 				agent.WithTools(am.toolReg.List()...),
+				agent.WithLazyMCPConfigs(lazyMCPConfigs),
 				agent.WithSystemPrompt(am.GetSystemPrompt()),
 				agent.WithRequirePlanApproval(false),
 				agent.WithMaxIterations(maxIterations), // 增加最大迭代次数
@@ -486,11 +494,19 @@ func (am *AgentManager) CreateSession() *ChatSession {
 		// 获取工具列表
 		tools := am.toolReg.List()
 
+		// 获取LazyMCP配置
+		lazyMCPConfigs, err := am.GetLazyMCPConfigs()
+		if err != nil {
+			logger.Warn(am.ctx, "Failed to get lazy MCP configs: %v", err)
+			lazyMCPConfigs = []agent.LazyMCPConfig{}
+		}
+
 		// 创建 Agent - 禁用执行计划审批
 		ag, err := agent.NewAgent(
 			agent.WithLLM(am.llmClient),
 			agent.WithMemory(mem),
 			agent.WithTools(tools...),
+			agent.WithLazyMCPConfigs(lazyMCPConfigs),
 			agent.WithSystemPrompt(am.GetSystemPrompt()),
 			agent.WithRequirePlanApproval(false),   // 禁用执行计划审批
 			agent.WithMaxIterations(maxIterations), // 增加最大迭代次数，避免过早触发 final call
@@ -500,7 +516,7 @@ func (am *AgentManager) CreateSession() *ChatSession {
 			logger.Warn(am.ctx, "Failed to create Agent for session %s: %v", session.ID, err)
 		} else {
 			am.agents[session.ID] = ag
-			logger.Info(am.ctx, "✓ Created Agent for session %s, tools count: %d", session.ID, len(tools))
+			logger.Info(am.ctx, "✓ Created Agent for session %s, tools count: %d, lazy MCP services: %d", session.ID, len(tools), len(lazyMCPConfigs))
 			for _, tool := range tools {
 				logger.Debug(am.ctx, "  - %s: %s", tool.Name(), tool.Description())
 			}
@@ -856,4 +872,93 @@ func (al *AgentLogger) Error(ctx context.Context, msg string, fields map[string]
 
 func (al *AgentLogger) Debug(ctx context.Context, msg string, fields map[string]interface{}) {
 	al.logger.Debug(ctx, "%s %s", msg, al.fieldsToString(fields))
+}
+
+// ReloadMCPServices 重新加载MCP服务配置
+func (am *AgentManager) ReloadMCPServices() error {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	// 重新初始化工具注册表
+	am.toolReg = tools.NewRegistry()
+	if err := am.initMCPTools(); err != nil {
+		return fmt.Errorf("failed to init MCP tools: %w", err)
+	}
+
+	logger.Info(am.ctx, "✓ MCP services reloaded successfully")
+
+	// Note: 现有会话的Agent实例不会自动更新
+	// 新会话将自动使用最新的工具列表
+
+	return nil
+}
+
+// GetLazyMCPConfigs 获取LazyMCP配置列表（用于Agent SDK）
+func (am *AgentManager) GetLazyMCPConfigs() ([]agent.LazyMCPConfig, error) {
+	// 从数据库加载MCP服务配置
+	services, err := am.db.ListMCPServices()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list MCP services: %w", err)
+	}
+
+	var lazyConfigs []agent.LazyMCPConfig
+	for _, service := range services {
+		if !service.Enabled {
+			continue
+		}
+
+		// 构建LazyMCPConfig
+		config := agent.LazyMCPConfig{
+			Name: service.Name,
+			Type: string(service.Type),
+		}
+
+		switch service.Type {
+		case models.MCPServiceTypeStdio:
+			config.Command = service.Command
+			config.Args = service.Args
+			// 转换环境变量格式 map[string]string -> []string
+			if len(service.Env) > 0 {
+				envSlice := make([]string, 0, len(service.Env))
+				for k, v := range service.Env {
+					envSlice = append(envSlice, k+"="+v)
+				}
+				config.Env = envSlice
+			}
+		case models.MCPServiceTypeSSE, models.MCPServiceTypeHTTP:
+			// 支持SSE和HTTP类型的MCP服务
+			if service.URL == "" {
+				logger.Warn(am.ctx, "MCP service %s missing URL, skipping", service.Name)
+				continue
+			}
+			config.URL = service.URL
+		} 
+		// 从数据库加载该服务的工具配置
+		tools, err := am.db.GetMCPServiceTools(service.ID)
+		if err != nil {
+			logger.Warn(am.ctx, "Failed to load tools for MCP service %s: %v", service.Name, err)
+			continue
+		}
+
+		// 转换工具配置
+		var toolConfigs []agent.LazyMCPToolConfig
+		for _, tool := range tools {
+			if !tool.Enabled {
+				continue
+			}
+			toolConfigs = append(toolConfigs, agent.LazyMCPToolConfig{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Schema:      tool.Schema,
+			})
+		}
+		config.Tools = toolConfigs
+
+		// 只有当有工具时才添加配置
+		if len(toolConfigs) > 0 {
+			lazyConfigs = append(lazyConfigs, config)
+		}
+	}
+
+	return lazyConfigs, nil
 }

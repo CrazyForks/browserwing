@@ -142,6 +142,20 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 			toolConfigs.POST("/sync", handler.SyncToolConfigs) // 同步工具配置
 		}
 
+		// MCP服务管理
+		mcpServices := api.Group("/mcp-services")
+		{
+			mcpServices.GET("", handler.ListMCPServices)                              // 列出所有MCP服务
+			mcpServices.GET("/:id", handler.GetMCPService)                            // 获取单个MCP服务
+			mcpServices.POST("", handler.CreateMCPService)                            // 创建MCP服务
+			mcpServices.PUT("/:id", handler.UpdateMCPService)                         // 更新MCP服务
+			mcpServices.DELETE("/:id", handler.DeleteMCPService)                      // 删除MCP服务
+			mcpServices.POST("/:id/toggle", handler.ToggleMCPService)                 // 启用/禁用MCP服务
+			mcpServices.GET("/:id/tools", handler.GetMCPServiceTools)                 // 获取MCP服务的工具列表
+			mcpServices.POST("/:id/discover", handler.DiscoverMCPServiceTools)        // 发现MCP服务的工具
+			mcpServices.PUT("/:id/tools/:toolName", handler.UpdateMCPServiceToolEnabled) // 更新工具启用状态
+		}
+
 		// Agent 聊天相关
 		if agentHandler != nil {
 			type AgentHandlerInterface interface {
