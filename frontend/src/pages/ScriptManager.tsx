@@ -340,8 +340,9 @@ export default function ScriptManager() {
       setLoading(true)
       await api.toggleScriptMCPCommand(mcpConfigScript.id, {
         is_mcp_command: false,
-        mcp_command_name: '',
-        mcp_command_description: '',
+        mcp_command_name: mcpConfigScript.mcp_command_name || '',
+        mcp_command_description: mcpConfigScript.mcp_command_description || '',
+        mcp_input_schema: mcpConfigScript.mcp_input_schema,
       })
       showMessage(t('script.messages.mcpCancelled'), 'success')
       await loadScripts()
