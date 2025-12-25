@@ -1947,7 +1947,7 @@ export default function ScriptManager() {
 
       {/* Import Confirmation Dialog */}
       {showImportConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ marginTop: 0, marginBottom: 0 }}>
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4">
             <div className="p-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
@@ -1992,7 +1992,7 @@ export default function ScriptManager() {
 
       {/* 批量设置分组对话框 */}
       {showBatchGroupDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ marginTop: 0, marginBottom: 0 }}>
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4">
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
@@ -2003,7 +2003,7 @@ export default function ScriptManager() {
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     {t('script.dialog.batchGroup.message', { count: selectedScripts.size })}
                   </label>
                   <input
@@ -2011,18 +2011,18 @@ export default function ScriptManager() {
                     value={batchGroupInput}
                     onChange={(e) => setBatchGroupInput(e.target.value)}
                     placeholder={t('script.dialog.batchGroup.placeholder')}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     onKeyPress={(e) => e.key === 'Enter' && handleBatchSetGroup()}
                   />
                   {availableGroups.length > 0 && (
                     <div className="mt-2">
-                      <p className="text-xs text-gray-500 mb-1">{t('script.dialog.batchGroup.existing')}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{t('script.dialog.batchGroup.existing')}</p>
                       <div className="flex flex-wrap gap-1">
                         {availableGroups.map(group => (
                           <button
                             key={group}
                             onClick={() => setBatchGroupInput(group)}
-                            className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded"
+                            className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 rounded transition-colors"
                           >
                             {group}
                           </button>
@@ -2034,10 +2034,10 @@ export default function ScriptManager() {
               </div>
               <div className="mt-6 flex justify-end space-x-3">
                 <button onClick={() => setShowBatchGroupDialog(false)} className="btn-secondary">
-                  取消
+                  {t('common.cancel')}
                 </button>
                 <button onClick={handleBatchSetGroup} disabled={loading || !batchGroupInput.trim()} className="btn-primary">
-                  确定
+                  {t('common.confirm')}
                 </button>
               </div>
             </div>
@@ -2047,7 +2047,7 @@ export default function ScriptManager() {
 
       {/* 批量添加标签对话框 */}
       {showBatchTagDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ marginTop: 0, marginBottom: 0 }}>
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4">
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
@@ -2058,7 +2058,7 @@ export default function ScriptManager() {
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     {t('script.dialog.batchTags.message', { count: selectedScripts.size })}
                   </label>
                   <input
@@ -2066,13 +2066,13 @@ export default function ScriptManager() {
                     value={batchTagsInput}
                     onChange={(e) => setBatchTagsInput(e.target.value)}
                     placeholder={t('script.dialog.batchTags.placeholder')}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     onKeyPress={(e) => e.key === 'Enter' && handleBatchAddTags()}
                   />
-                  <p className="text-xs text-gray-500 mt-1">{t('script.dialog.batchTags.example')}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{t('script.dialog.batchTags.example')}</p>
                   {availableTags.length > 0 && (
                     <div className="mt-2">
-                      <p className="text-xs text-gray-500 mb-1">{t('script.dialog.batchTags.existing')}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{t('script.dialog.batchTags.existing')}</p>
                       <div className="flex flex-wrap gap-1">
                         {availableTags.map(tag => (
                           <button
@@ -2083,7 +2083,7 @@ export default function ScriptManager() {
                                 setBatchTagsInput([...current, tag].join(', '))
                               }
                             }}
-                            className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded"
+                            className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 rounded transition-colors"
                           >
                             {tag}
                           </button>
@@ -2095,10 +2095,10 @@ export default function ScriptManager() {
               </div>
               <div className="mt-6 flex justify-end space-x-3">
                 <button onClick={() => setShowBatchTagDialog(false)} className="btn-secondary">
-                  取消
+                  {t('common.cancel')}
                 </button>
                 <button onClick={handleBatchAddTags} disabled={loading || !batchTagsInput.trim()} className="btn-primary">
-                  确定
+                  {t('common.confirm')}
                 </button>
               </div>
             </div>
