@@ -699,12 +699,10 @@ if (window.__browserwingRecorder__) {
 				js_code: result.javascript,
 				variable_name: variableName,
 				tagName: formElement.tagName ? formElement.tagName.toLowerCase() : '',
-				description: '{{AI_FORMFILL_DESC}}'
-			};
-			
-			recordAction(action);
-			
-			// 移除 Loading
+			description: '{{AI_FORMFILL_DESC}}'
+		};
+		
+		recordAction(action, formElement, 'execute_js');			// 移除 Loading
 			removeFullPageLoading();
 			
 			showCurrentAction('{{AI_FORMFILL_SUCCESS}}' + (result.used_model || 'unknown'));
@@ -809,12 +807,10 @@ if (window.__browserwingRecorder__) {
 				js_code: result.javascript,
 				variable_name: variableName,
 				tagName: element.tagName ? element.tagName.toLowerCase() : '',
-				description: '{{AI_EXTRACT_DESC}}'
-			};
-			
-			recordAction(action);
-			
-			// 移除 Loading
+			description: '{{AI_EXTRACT_DESC}}'
+		};
+		
+		recordAction(action, window.__selectedElement__, 'execute_js');			// 移除 Loading
 			removeFullPageLoading();
 			
 			showCurrentAction('{{AI_EXTRACT_SUCCESS}}' + (result.used_model || 'unknown'));
@@ -1038,7 +1034,7 @@ if (window.__browserwingRecorder__) {
 			action.attribute_name = attributeName;
 		}
 		
-		recordAction(action);
+		recordAction(action, element, 'extract_' + extractType);
 		
 		var actionText = 'Extracted ' + extractType + ' from <' + action.tagName + '> as ' + variableName;
 		showCurrentAction(actionText);
@@ -1228,8 +1224,387 @@ if (window.__browserwingRecorder__) {
 		}
 	};
 	
+	// ============= 语义信息提取辅助函数（用于自愈） =============
+	
+	// 获取元素的隐式角色
+	var implicitRole = function(el) {
+		if (!el || !el.tagName) return 'generic';
+		
+		var tag = el.tagName.toLowerCase();
+		var type = el.type ? el.type.toLowerCase() : '';
+		
+		// 常见的隐式角色映射
+		if (tag === 'button') return 'button';
+		if (tag === 'a') return 'link';
+		if (tag === 'input') {
+			if (type === 'text' || type === '') return 'textbox';
+			if (type === 'email') return 'textbox';
+			if (type === 'password') return 'textbox';
+			if (type === 'search') return 'searchbox';
+			if (type === 'tel') return 'textbox';
+			if (type === 'url') return 'textbox';
+			if (type === 'checkbox') return 'checkbox';
+			if (type === 'radio') return 'radio';
+			if (type === 'submit') return 'button';
+			if (type === 'button') return 'button';
+			if (type === 'file') return 'button';
+		}
+		if (tag === 'textarea') return 'textbox';
+		if (tag === 'select') return 'combobox';
+		if (tag === 'img') return 'img';
+		if (tag === 'nav') return 'navigation';
+		if (tag === 'header') return 'banner';
+		if (tag === 'footer') return 'contentinfo';
+		if (tag === 'main') return 'main';
+		if (tag === 'aside') return 'complementary';
+		if (tag === 'form') return 'form';
+		if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6') return 'heading';
+		if (tag === 'ul' || tag === 'ol') return 'list';
+		if (tag === 'li') return 'listitem';
+		
+		return 'generic';
+	};
+	
+	// 获取元素的 ARIA 角色
+	var getRole = function(el) {
+		if (!el) return 'generic';
+		return el.getAttribute('role') || implicitRole(el);
+	};
+	
+	// 获取 label 元素的文本
+	var getLabelText = function(el) {
+		if (!el || !el.id) return '';
+		var label = document.querySelector('label[for="' + el.id + '"]');
+		return label ? label.innerText.trim() : '';
+	};
+	
+	// 获取元素的可访问名称（Accessible Name）
+	var getAccessibleName = function(el) {
+		if (!el) return '';
+		
+		// 1. aria-label 优先级最高
+		var ariaLabel = el.getAttribute('aria-label');
+		if (ariaLabel) return ariaLabel.trim();
+		
+		// 2. aria-labelledby
+		var labelledby = el.getAttribute('aria-labelledby');
+		if (labelledby) {
+			var labelElement = document.getElementById(labelledby);
+			if (labelElement) return labelElement.innerText.trim();
+		}
+		
+		// 3. 关联的 label 元素
+		var labelText = getLabelText(el);
+		if (labelText) return labelText;
+		
+		// 4. 元素自身文本（限制长度）
+		if (el.innerText) {
+			var text = el.innerText.trim();
+			if (text.length > 50) text = text.substring(0, 50) + '...';
+			return text;
+		}
+		
+		// 5. placeholder
+		if (el.placeholder) return el.placeholder.trim();
+		
+		// 6. title 属性
+		if (el.title) return el.title.trim();
+		
+		// 7. alt 属性（图片等）
+		if (el.alt) return el.alt.trim();
+		
+		// 8. value 属性（按钮等）
+		if (el.value && (el.tagName === 'BUTTON' || el.tagName === 'INPUT')) {
+			return el.value.trim();
+		}
+		
+		return '';
+	};
+	
+	// 推断操作动词
+	var inferVerb = function(eventType, el) {
+		if (eventType === 'click') return 'click';
+		if (eventType === 'input') return 'input';
+		if (eventType === 'change') {
+			if (el && el.tagName === 'SELECT') return 'select';
+			if (el && el.type === 'checkbox') return 'check';
+			if (el && el.type === 'radio') return 'choose';
+			return 'change';
+		}
+		if (eventType === 'submit') return 'submit';
+		if (eventType === 'keydown' || eventType === 'keyup' || eventType === 'keypress') return 'type';
+		return 'interact';
+	};
+	
+	// 推断操作对象
+	var inferObject = function(el) {
+		if (!el) return 'element';
+		
+		// 优先使用可访问名称
+		var name = getAccessibleName(el);
+		if (name) return name;
+		
+		// 使用 name 属性
+		if (el.name) return el.name;
+		
+		// 使用 id
+		if (el.id) return el.id;
+		
+		// 使用标签名
+		return el.tagName.toLowerCase();
+	};
+	
+	// 获取附近的可见文本（用于上下文定位）
+	var getNearbyText = function(el, maxDistance) {
+		if (!el) return [];
+		
+		maxDistance = maxDistance || 100; // 默认 100px
+		var rect = el.getBoundingClientRect();
+		var centerX = rect.left + rect.width / 2;
+		var centerY = rect.top + rect.height / 2;
+		
+		var nearbyTexts = [];
+		var textNodes = [];
+		
+		// 收集页面上所有可见的文本节点
+		var walker = document.createTreeWalker(
+			document.body,
+			NodeFilter.SHOW_TEXT,
+			{
+				acceptNode: function(node) {
+					// 过滤掉脚本、样式等
+					var parent = node.parentElement;
+					if (!parent) return NodeFilter.FILTER_REJECT;
+					
+					var tag = parent.tagName.toLowerCase();
+					if (tag === 'script' || tag === 'style' || tag === 'noscript') {
+						return NodeFilter.FILTER_REJECT;
+					}
+					
+					// 过滤掉空白文本
+					var text = node.textContent.trim();
+					if (!text) return NodeFilter.FILTER_REJECT;
+					
+					// 检查是否可见
+					var style = window.getComputedStyle(parent);
+					if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+						return NodeFilter.FILTER_REJECT;
+					}
+					
+					return NodeFilter.FILTER_ACCEPT;
+				}
+			},
+			false
+		);
+		
+		var node;
+		while (node = walker.nextNode()) {
+			textNodes.push(node);
+		}
+		
+		// 计算每个文本节点与目标元素的距离
+		for (var i = 0; i < textNodes.length; i++) {
+			var textNode = textNodes[i];
+			var parent = textNode.parentElement;
+			
+			// 跳过目标元素内部的文本
+			if (el.contains(parent)) continue;
+			
+			var range = document.createRange();
+			range.selectNodeContents(textNode);
+			var textRect = range.getBoundingClientRect();
+			
+			var textCenterX = textRect.left + textRect.width / 2;
+			var textCenterY = textRect.top + textRect.height / 2;
+			
+			var distance = Math.sqrt(
+				Math.pow(textCenterX - centerX, 2) + 
+				Math.pow(textCenterY - centerY, 2)
+			);
+			
+			if (distance <= maxDistance) {
+				var text = textNode.textContent.trim();
+				if (text.length > 30) text = text.substring(0, 30) + '...';
+				nearbyTexts.push(text);
+			}
+		}
+		
+		// 去重并限制数量
+		var uniqueTexts = [];
+		for (var j = 0; j < nearbyTexts.length && uniqueTexts.length < 5; j++) {
+			if (uniqueTexts.indexOf(nearbyTexts[j]) === -1) {
+				uniqueTexts.push(nearbyTexts[j]);
+			}
+		}
+		
+		return uniqueTexts;
+	};
+	
+	// 获取祖先标签列表（用于上下文）
+	var getAncestorTags = function(el) {
+		if (!el) return [];
+		
+		var ancestors = [];
+		var current = el.parentElement;
+		var depth = 0;
+		var maxDepth = 10; // 最多向上查找10层
+		
+		while (current && depth < maxDepth) {
+			var tag = current.tagName.toLowerCase();
+			ancestors.push(tag);
+			
+			// 如果遇到 body，停止
+			if (tag === 'body') break;
+			
+			current = current.parentElement;
+			depth++;
+		}
+		
+		return ancestors;
+	};
+	
+	// 获取表单提示信息（判断是登录、搜索还是其他）
+	var getFormHint = function(el) {
+		if (!el) return '';
+		
+		// 向上查找最近的 form 元素
+		var form = el.closest('form');
+		if (!form) return '';
+		
+		// 检查 form 的 id, name, class
+		var formId = (form.id || '').toLowerCase();
+		var formName = (form.name || '').toLowerCase();
+		var formClass = (form.className || '').toLowerCase();
+		
+		var combined = formId + ' ' + formName + ' ' + formClass;
+		
+		if (combined.indexOf('login') !== -1 || combined.indexOf('signin') !== -1) return 'login';
+		if (combined.indexOf('register') !== -1 || combined.indexOf('signup') !== -1) return 'register';
+		if (combined.indexOf('search') !== -1) return 'search';
+		if (combined.indexOf('checkout') !== -1 || combined.indexOf('payment') !== -1) return 'checkout';
+		if (combined.indexOf('contact') !== -1) return 'contact';
+		
+		// 检查 form 中的 input 类型
+		var inputs = form.querySelectorAll('input');
+		var hasPassword = false;
+		var hasEmail = false;
+		
+		for (var i = 0; i < inputs.length; i++) {
+			var type = inputs[i].type.toLowerCase();
+			if (type === 'password') hasPassword = true;
+			if (type === 'email') hasEmail = true;
+		}
+		
+		if (hasPassword && hasEmail) return 'login';
+		if (hasPassword) return 'auth';
+		
+		return 'generic';
+	};
+	
+	// 获取后端 DOM 节点 ID（如果可用）
+	var getBackendNodeId = function(el) {
+		// 这需要通过 CDP 协议获取，在纯 JS 中无法直接获取
+		// 返回 null，由 Go 端在需要时填充
+		return null;
+	};
+	
+	// 计算匹配置信度（基于选择器的可靠性）
+	var calculateConfidence = function(el, selectors) {
+		if (!el || !selectors) return 0.5;
+		
+		var confidence = 0.5; // 基础置信度
+		
+		// 如果有 id，置信度高
+		if (el.id && selectors.css.indexOf('#' + el.id) !== -1) {
+			confidence = 0.95;
+		}
+		// 如果有 name 属性
+		else if (el.name) {
+			confidence = 0.85;
+		}
+		// 如果有 aria-label
+		else if (el.getAttribute('aria-label')) {
+			confidence = 0.8;
+		}
+		// 如果有关联的 label
+		else if (getLabelText(el)) {
+			confidence = 0.75;
+		}
+		// 如果有稳定的 class
+		else if (el.className && typeof el.className === 'string') {
+			var classes = el.className.split(' ');
+			var hasStableClass = false;
+			for (var i = 0; i < classes.length; i++) {
+				var cls = classes[i];
+				// 检查是否是动态生成的 class（如 css-xxxxx）
+				if (cls && !/^(css|jss|sc)-[\w-]+$/.test(cls)) {
+					hasStableClass = true;
+					break;
+				}
+			}
+			if (hasStableClass) {
+				confidence = 0.7;
+			} else {
+				confidence = 0.4;
+			}
+		}
+		// 只能用 nth-child
+		else if (selectors.css.indexOf(':nth-child') !== -1) {
+			confidence = 0.3;
+		}
+		
+		return confidence;
+	};
+	
+	// ============= 结束：语义信息提取辅助函数 =============
+	
+	// 为操作添加语义信息（Intent, Accessibility, Context, Evidence）
+	var enrichActionWithSemantics = function(action, element, eventType) {
+		if (!element) return action;
+		
+		try {
+			// 获取选择器（如果还没有）
+			var selectors = null;
+			if (!action.selector || !action.xpath) {
+				selectors = getSelector(element);
+			}
+			
+			// 1. 填充 Intent（操作意图）
+			action.intent = {
+				verb: inferVerb(eventType, element),
+				object: inferObject(element)
+			};
+			
+			// 2. 填充 Accessibility（可访问性信息）
+			action.accessibility = {
+				role: getRole(element),
+				name: getAccessibleName(element),
+				value: element.value || ''
+			};
+			
+			// 3. 填充 Context（上下文信息）
+			action.context = {
+				nearby_text: getNearbyText(element, 100),
+				ancestor_tags: getAncestorTags(element),
+				form_hint: getFormHint(element)
+			};
+			
+			// 4. 填充 Evidence（录制证据）
+			action.evidence = {
+				backend_dom_node_id: 0, // 将由 Go 端填充（如果需要）
+				ax_node_id: '', // 将由 Go 端填充（如果需要）
+				confidence: calculateConfidence(element, selectors || {css: action.selector, xpath: action.xpath})
+			};
+			
+		} catch (e) {
+			console.error('[BrowserWing] Failed to enrich action with semantics:', e);
+		}
+		
+		return action;
+	};
+	
 	// 记录操作的辅助函数（带去重）
-	var recordAction = function(action) {
+	var recordAction = function(action, element, eventType) {
 		// 去重逻辑：检查最近的操作是否与当前操作重复
 		if (window.__recordedActions__.length > 0) {
 			var lastAction = window.__recordedActions__[window.__recordedActions__.length - 1];
@@ -1282,30 +1657,33 @@ if (window.__browserwingRecorder__) {
 				}
 			}
 			
-			// 自动插入 sleep：如果两个操作间隔超过 1 秒，插入 sleep action
-			var timeDiff = action.timestamp - lastAction.timestamp;
-			if (timeDiff > 1000 && lastAction.type !== 'sleep') {
-				var sleepDuration = Math.round(timeDiff) / 3;
-				// 最长为5秒
-				if (sleepDuration > 5000) {
-					sleepDuration = 5000;
-				}
-				
-				// 创建 sleep 操作
-				var sleepAction = {
-					type: 'sleep',
-					timestamp: lastAction.timestamp + 1, // 紧跟在上一个操作之后
-					duration: sleepDuration,
-					description: '{{AUTO_WAIT}}' + (sleepDuration / 1000).toFixed(1) + ' {{SECONDS_UNIT}}'
-				};
-				
-				window.__recordedActions__.push(sleepAction);
+		// 自动插入 sleep：如果两个操作间隔超过 1 秒，插入 sleep action
+		var timeDiff = action.timestamp - lastAction.timestamp;
+		if (timeDiff > 1000 && lastAction.type !== 'sleep') {
+			var sleepDuration = Math.round(Math.round(timeDiff) / 3);
+			// 最长为5秒
+			if (sleepDuration > 5000) {
+				sleepDuration = 5000;
+			}
+			
+			// 创建 sleep 操作
+			var sleepAction = {
+				type: 'sleep',
+				timestamp: lastAction.timestamp + 1, // 紧跟在上一个操作之后
+				duration: sleepDuration,
+				description: '{{AUTO_WAIT}}' + (sleepDuration / 1000).toFixed(1) + ' {{SECONDS_UNIT}}'
+			};				window.__recordedActions__.push(sleepAction);
 				console.log('[BrowserWing] ⏱ Auto-inserted sleep action: ' + sleepDuration + 'ms');
 				
 				// 更新 UI（添加 sleep action）
 				updateActionCount();
 				addActionToList(sleepAction, window.__recordedActions__.length - 1);
 			}
+		}
+		
+		// 添加语义信息（自愈所需）
+		if (element && eventType) {
+			action = enrichActionWithSemantics(action, element, eventType);
 		}
 		
 		// 添加新操作
@@ -1589,7 +1967,7 @@ if (window.__browserwingRecorder__) {
 							description: '{{FILES_SELECTED}}' + fileNames.length + ' {{FILES_COUNT}}' + fileNames.join(', ')
 						};
 						
-						recordAction(action);
+						recordAction(action, fileInput, 'change');
 						showCurrentAction('{{UPLOAD_FILE}}' + fileNames.join(', '));
 					} else {
 						console.log('[BrowserWing] No files selected');
@@ -1619,7 +1997,7 @@ if (window.__browserwingRecorder__) {
 				y: e.clientY || 0
 			};
 			
-			recordAction(action);
+			recordAction(action, target, 'click');
 			
 			var actionText = 'Clicked <' + action.tagName + '>';
 			if (action.text) {
@@ -1689,7 +2067,7 @@ if (window.__browserwingRecorder__) {
 					xpath: selectors.xpath,
 					value: content,
 					tagName: isContentEditable ? 'contenteditable' : tagName.toLowerCase()
-				});
+				}, target, 'input');
 			}, 500);
 		} catch (err) {
 			console.error('[BrowserWing] input event error:', err);
@@ -1754,7 +2132,7 @@ if (window.__browserwingRecorder__) {
 					xpath: selectors.xpath,
 					value: content,
 					tagName: isContentEditable ? 'contenteditable' : tagName.toLowerCase()
-				});
+				}, target, 'blur');
 			}
 		} catch (err) {
 			console.error('[BrowserWing] blur event error:', err);
@@ -1795,7 +2173,7 @@ if (window.__browserwingRecorder__) {
 					xpath: selectors.xpath,
 					value: content,
 					tagName: 'contenteditable'
-				});
+				}, editableParent, 'input');
 			}, 500);
 		} catch (err) {
 			console.error('[BrowserWing] DOMCharacterDataModified event error:', err);
@@ -1843,7 +2221,7 @@ if (window.__browserwingRecorder__) {
 						description: '{{FILES_SELECTED}}' + fileNames.length + ' {{FILES_COUNT}}' + fileNames.join(', ')
 					};
 					
-					recordAction(action);
+					recordAction(action, target, 'change');
 					showCurrentAction('{{UPLOAD_FILE}}' + fileNames.join(', '));
 				}
 				return;
@@ -1864,7 +2242,7 @@ if (window.__browserwingRecorder__) {
 					value: target.value || '',
 					text: selectedText,
 					tagName: 'select'
-				});
+				}, target, 'change');
 			} else if (tagName === 'INPUT' && (target.type === 'checkbox' || target.type === 'radio')) {
 				// 记录复选框和单选框的变化
 				var selectors = getSelector(target);
@@ -1875,7 +2253,7 @@ if (window.__browserwingRecorder__) {
 					xpath: selectors.xpath,
 					value: target.checked ? 'checked' : 'unchecked',
 					tagName: tagName.toLowerCase()
-				});
+				}, target, 'change');
 			}
 		} catch (err) {
 			console.error('[BrowserWing] change event error:', err);
@@ -2060,7 +2438,7 @@ if (window.__browserwingRecorder__) {
 			
 			// 如果识别到需要记录的按键，记录动作
 			if (keyAction) {
-				recordAction(keyAction);
+				recordAction(keyAction, target, 'keydown');
 				showCurrentAction(keyAction.description);
 				console.log('[BrowserWing] Recorded keyboard action:', keyAction.key);
 			}
@@ -2108,13 +2486,11 @@ if (window.__browserwingRecorder__) {
 						timestamp: Date.now(),
 						scroll_x: Math.round(currentScrollX),
 						scroll_y: Math.round(currentScrollY),
-						description: '{{SCROLL_TO}}' + ' X:' + Math.round(currentScrollX) + ', Y:' + Math.round(currentScrollY)
-					};
-					
-					recordAction(action);
-					showCurrentAction('{{SCROLL_TO}}' + ' X:' + Math.round(currentScrollX) + ', Y:' + Math.round(currentScrollY));
-					
-					lastScrollX = currentScrollX;
+					description: '{{SCROLL_TO}}' + ' X:' + Math.round(currentScrollX) + ', Y:' + Math.round(currentScrollY)
+				};
+				
+				recordAction(action, document.documentElement || document.body, 'scroll');
+				showCurrentAction('{{SCROLL_TO}}' + ' X:' + Math.round(currentScrollX) + ', Y:' + Math.round(currentScrollY));					lastScrollX = currentScrollX;
 					lastScrollY = currentScrollY;
 				}
 			} catch (err) {

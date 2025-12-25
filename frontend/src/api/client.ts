@@ -211,6 +211,27 @@ export interface ScriptAction {
   // 滚动相关字段
   scroll_x?: number
   scroll_y?: number
+
+  // 语义信息字段（用于自愈）
+  intent?: {
+    verb?: string
+    object?: string
+  }
+  accessibility?: {
+    role?: string
+    name?: string
+    value?: string
+  }
+  context?: {
+    nearby_text?: string[]
+    ancestor_tags?: string[]
+    form_hint?: string
+  }
+  evidence?: {
+    backend_dom_node_id?: number
+    ax_node_id?: string
+    confidence?: number
+  }
 }
 
 export interface Script {

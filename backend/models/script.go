@@ -13,9 +13,11 @@ type DownloadedFile struct {
 	Size         int64     `json:"size"`          // 文件大小（字节）
 	DownloadTime time.Time `json:"download_time"` // 下载时间
 }
-
-// ScriptAction 脚本操作步骤
+// ScriptAction 脚本操作步骤（v2 - 支持语义与自愈，向后兼容）
 type ScriptAction struct {
+	// =========================
+	// 原有字段（保持不变）
+	// =========================
 	Type      string            `json:"type"`      // click, input, select, navigate, wait, sleep, extract_text, extract_attribute, extract_html, execute_js, upload_file, scroll, keyboard, open_tab, switch_tab
 	Timestamp int64             `json:"timestamp"` // 时间戳（毫秒）
 	Selector  string            `json:"selector"`  // CSS选择器
@@ -30,25 +32,64 @@ type ScriptAction struct {
 	Attrs     map[string]string `json:"attrs"`     // 元素属性
 
 	// 键盘事件相关字段
-	Key string `json:"key,omitempty"` // 键盘按键（用于 keyboard 类型，如 "ctrl+c", "ctrl+v", "enter"）
+	Key string `json:"key,omitempty"` // 键盘按键（用于 keyboard 类型，如 "ctrl+c", "enter"）
 
 	// 数据抓取相关字段
-	ExtractType   string `json:"extract_type,omitempty"`   // 抓取类型: text, attribute, html
-	AttributeName string `json:"attribute_name,omitempty"` // 要抓取的属性名（用于 extract_attribute）
-	JSCode        string `json:"js_code,omitempty"`        // 要执行的 JavaScript 代码（用于 execute_js）
-	VariableName  string `json:"variable_name,omitempty"`  // 存储抓取数据的变量名（便于引用）
-	ExtractedData string `json:"extracted_data,omitempty"` // 回放时抓取到的数据（运行时填充）
+	ExtractType   string `json:"extract_type,omitempty"`   // text, attribute, html
+	AttributeName string `json:"attribute_name,omitempty"` // 抓取的属性名
+	JSCode        string `json:"js_code,omitempty"`        // JS 代码
+	VariableName  string `json:"variable_name,omitempty"`  // 变量名
+	ExtractedData string `json:"extracted_data,omitempty"` // 回放时填充
 
 	// 文件上传相关字段
-	FilePaths   []string `json:"file_paths,omitempty"`  // 要上传的文件路径（用于 upload_file）
-	FileNames   []string `json:"file_names,omitempty"`  // 文件名（录制时记录，回放时可选）
-	Description string   `json:"description,omitempty"` // 操作描述
-	Multiple    bool     `json:"multiple,omitempty"`    // 是否支持多文件上传
-	Accept      string   `json:"accept,omitempty"`      // 接受的文件类型
+	FilePaths   []string `json:"file_paths,omitempty"`
+	FileNames   []string `json:"file_names,omitempty"`
+	Description string   `json:"description,omitempty"` // 人类可读描述
+	Multiple    bool     `json:"multiple,omitempty"`
+	Accept      string   `json:"accept,omitempty"`
 
 	// 滚动相关字段
-	ScrollX int `json:"scroll_x,omitempty"` // 水平滚动位置（像素）
-	ScrollY int `json:"scroll_y,omitempty"` // 垂直滚动位置（像素）
+	ScrollX int `json:"scroll_x,omitempty"`
+	ScrollY int `json:"scroll_y,omitempty"`
+
+	// =========================
+	// 新增字段（v2，自愈核心）
+	// =========================
+
+	// ① 操作意图（结构化，而不是自由文本）
+	Intent *ActionIntent `json:"intent,omitempty"`
+
+	// ② Accessibility 语义信息（最重要）
+	Accessibility *AccessibilityInfo `json:"accessibility,omitempty"`
+
+	// ③ 上下文锚点（用于消歧 & 自愈）
+	Context *ActionContext `json:"context,omitempty"`
+
+	// ④ 录制证据（debug / 自愈评分用）
+	Evidence *ActionEvidence `json:"evidence,omitempty"`
+}
+
+type ActionIntent struct {
+	Verb   string `json:"verb,omitempty"`   // click, input, select, submit
+	Object string `json:"object,omitempty"` // login button, email input
+}
+
+type AccessibilityInfo struct {
+	Role  string `json:"role,omitempty"`  // button, textbox, link
+	Name  string `json:"name,omitempty"`  // Sign In, Email
+	Value string `json:"value,omitempty"` // 输入框当前值（可选）
+}
+
+type ActionContext struct {
+	NearbyText   []string `json:"nearby_text,omitempty"`   // 附近可见文本
+	AncestorTags []string `json:"ancestor_tags,omitempty"` // form, section
+	FormHint     string   `json:"form_hint,omitempty"`     // login, search
+}
+
+type ActionEvidence struct {
+	BackendDOMNodeID int64  `json:"backend_dom_node_id,omitempty"`
+	AXNodeID         string `json:"ax_node_id,omitempty"`
+	Confidence       float64 `json:"confidence,omitempty"` // 录制时匹配置信度
 }
 
 // Script 自动化脚本

@@ -2856,6 +2856,106 @@ function SortableActionItem({ id, action, index, onUpdate, onDelete, onDuplicate
               </div>
             )}
           </div>
+
+          {/* 语义信息展示（编辑模式） */}
+          {(action.intent || action.accessibility || action.context || action.evidence) && (
+            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+              <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center space-x-2">
+                <span>{t('script.action.semanticInfo')}</span>
+                <span className="text-xs font-normal text-gray-400 dark:text-gray-500">({t('script.action.readOnly')})</span>
+              </div>
+
+              {action.intent && (action.intent.verb || action.intent.object) && (
+                <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 text-sm">
+                  <div className="font-medium text-purple-700 dark:text-purple-300 mb-1">Intent</div>
+                  <div className="text-gray-700 dark:text-gray-300">
+                    {action.intent.verb && <code className="bg-white dark:bg-gray-800 px-2 py-1 rounded text-xs">{action.intent.verb}</code>}
+                    {action.intent.verb && action.intent.object && ' → '}
+                    {action.intent.object && <span className="font-medium">{action.intent.object}</span>}
+                  </div>
+                </div>
+              )}
+
+              {action.accessibility && (action.accessibility.role || action.accessibility.name) && (
+                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-sm">
+                  <div className="font-medium text-blue-700 dark:text-blue-300 mb-1">Accessibility</div>
+                  <div className="text-gray-700 dark:text-gray-300 space-y-1">
+                    {action.accessibility.role && (
+                      <div>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">Role:</span>{' '}
+                        <code className="bg-white dark:bg-gray-800 px-2 py-1 rounded text-xs">{action.accessibility.role}</code>
+                      </div>
+                    )}
+                    {action.accessibility.name && (
+                      <div>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">Name:</span>{' '}
+                        <span className="font-medium">"{action.accessibility.name}"</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {action.context && (
+                <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 text-sm space-y-2">
+                  <div className="font-medium text-green-700 dark:text-green-300">Context</div>
+                  {action.context.nearby_text && action.context.nearby_text.length > 0 && (
+                    <div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Nearby Text:</div>
+                      <div className="flex flex-wrap gap-1">
+                        {action.context.nearby_text.slice(0, 3).map((text, i) => (
+                          <span key={i} className="inline-block bg-white dark:bg-gray-800 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300">
+                            {text}
+                          </span>
+                        ))}
+                        {action.context.nearby_text.length > 3 && (
+                          <span className="inline-block text-xs text-gray-500">+{action.context.nearby_text.length - 3}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {action.context.ancestor_tags && action.context.ancestor_tags.length > 0 && (
+                    <div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Ancestors:</div>
+                      <code className="block bg-white dark:bg-gray-800 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300">
+                        {action.context.ancestor_tags.slice(0, 5).join(' > ')}
+                        {action.context.ancestor_tags.length > 5 && ' ...'}
+                      </code>
+                    </div>
+                  )}
+                  {action.context.form_hint && (
+                    <div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Form Type:</div>
+                      <code className="bg-white dark:bg-gray-800 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300">
+                        {action.context.form_hint}
+                      </code>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {action.evidence && action.evidence.confidence !== undefined && (
+                <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-3 text-sm">
+                  <div className="font-medium text-orange-700 dark:text-orange-300 mb-2">Evidence</div>
+                  <div className="flex items-center space-x-3">
+                    <span className="text-xs text-gray-500 dark:text-gray-400">Confidence:</span>
+                    <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-xs">
+                      <div
+                        className={`h-2 rounded-full transition-all ${action.evidence.confidence >= 0.8 ? 'bg-green-500' :
+                            action.evidence.confidence >= 0.6 ? 'bg-yellow-500' :
+                              'bg-orange-500'
+                          }`}
+                        style={{ width: `${action.evidence.confidence * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-mono font-medium text-gray-700 dark:text-gray-300">
+                      {(action.evidence.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex flex-col gap-2">
           <button
@@ -3030,6 +3130,99 @@ function ActionItemView({ action, index }: ActionItemViewProps) {
           <div className="text-sm text-gray-600 dark:text-gray-400">
             <span className="font-medium">标签页索引:</span>{' '}
             <span className="text-gray-800 dark:text-gray-200">{action.value}</span>
+          </div>
+        )}
+
+        {/* 语义信息展示 */}
+        {(action.intent || action.accessibility || action.context || action.evidence) && (
+          <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
+            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+              {t('script.action.semanticInfo')}
+            </div>
+
+            {action.intent && (action.intent.verb || action.intent.object) && (
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                <span className="font-medium text-purple-600 dark:text-purple-400">Intent:</span>{' '}
+                <span className="text-gray-800 dark:text-gray-200">
+                  {action.intent.verb && <code className="bg-purple-50 dark:bg-purple-900/30 px-1.5 py-0.5 rounded text-xs">{action.intent.verb}</code>}
+                  {action.intent.verb && action.intent.object && ' → '}
+                  {action.intent.object && <span className="font-medium">{action.intent.object}</span>}
+                </span>
+              </div>
+            )}
+
+            {action.accessibility && (action.accessibility.role || action.accessibility.name) && (
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                <span className="font-medium text-blue-600 dark:text-blue-400">Accessibility:</span>{' '}
+                <span className="text-gray-800 dark:text-gray-200">
+                  {action.accessibility.role && (
+                    <code className="bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 rounded text-xs mr-2">
+                      {action.accessibility.role}
+                    </code>
+                  )}
+                  {action.accessibility.name && (
+                    <span className="font-medium">"{action.accessibility.name}"</span>
+                  )}
+                </span>
+              </div>
+            )}
+
+            {action.context && (
+              <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                {action.context.nearby_text && action.context.nearby_text.length > 0 && (
+                  <div>
+                    <span className="font-medium text-green-600 dark:text-green-400">Nearby Text:</span>{' '}
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {action.context.nearby_text.slice(0, 3).map((text, i) => (
+                        <span key={i} className="inline-block bg-green-50 dark:bg-green-900/30 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300">
+                          {text}
+                        </span>
+                      ))}
+                      {action.context.nearby_text.length > 3 && (
+                        <span className="inline-block text-xs text-gray-500">+{action.context.nearby_text.length - 3} more</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {action.context.ancestor_tags && action.context.ancestor_tags.length > 0 && (
+                  <div>
+                    <span className="font-medium text-green-600 dark:text-green-400">Ancestors:</span>{' '}
+                    <code className="bg-green-50 dark:bg-green-900/30 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300">
+                      {action.context.ancestor_tags.slice(0, 5).join(' > ')}
+                      {action.context.ancestor_tags.length > 5 && ' ...'}
+                    </code>
+                  </div>
+                )}
+                {action.context.form_hint && (
+                  <div>
+                    <span className="font-medium text-green-600 dark:text-green-400">Form Type:</span>{' '}
+                    <code className="bg-green-50 dark:bg-green-900/30 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300">
+                      {action.context.form_hint}
+                    </code>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {action.evidence && action.evidence.confidence !== undefined && (
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                <span className="font-medium text-orange-600 dark:text-orange-400">Confidence:</span>{' '}
+                <div className="inline-flex items-center space-x-2">
+                  <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 w-32">
+                    <div
+                      className={`h-2 rounded-full ${action.evidence.confidence >= 0.8 ? 'bg-green-500' :
+                          action.evidence.confidence >= 0.6 ? 'bg-yellow-500' :
+                            'bg-orange-500'
+                        }`}
+                      style={{ width: `${action.evidence.confidence * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-xs font-mono text-gray-700 dark:text-gray-300">
+                    {(action.evidence.confidence * 100).toFixed(0)}%
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -404,6 +404,8 @@ export const translations = {
     'script.action.filePathHint': '回放时使用的文件绝对路径',
     'script.action.inputPlaceholder': '输入内容或选择值',
     'script.action.deleteStep': '删除此步骤',
+    'script.action.semanticInfo': '语义信息',
+    'script.action.readOnly': '录制时自动采集',
 
     // 脚本执行记录
     'execution.title': '脚本执行记录',
