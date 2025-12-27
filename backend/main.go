@@ -111,6 +111,19 @@ func main() {
 		log.Println("✓ MCP server initialized successfully")
 	}
 
+	if cfg.Server.MCPPort != "" {
+		host := ""
+		if cfg.Server.MCPHost != "" {
+			host = cfg.Server.MCPHost
+		}
+		err = mcpServer.StartStreamableHTTPServer(host + ":" + cfg.Server.MCPPort)
+		if err != nil {
+			log.Printf("Warning: Failed to start streamable HTTP server: %v", err)
+		} else {
+			log.Println("✓ Streamable HTTP server initialized successfully")
+		}
+	}
+
 	// 初始化 Agent 管理器
 	agentManager, err := agent.NewAgentManager(db, mcpServer)
 	if err != nil {

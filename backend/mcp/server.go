@@ -70,6 +70,21 @@ func NewMCPServer(storage *storage.BoltDB, browserMgr *browser.Manager) *MCPServ
 	return s
 }
 
+func (s *MCPServer) StartStreamableHTTPServer(port string) error {
+	go func() {
+		newServer := server.NewStreamableHTTPServer(
+			s.mcpServer,
+			server.WithEndpointPath("/mcp"),
+			server.WithStateful(true),
+		)
+		if err := newServer.Start(port); err != nil {
+			logger.Error(s.ctx, "Failed to start streamable HTTP server: %v", err)
+		}
+		logger.Info(s.ctx, "Streamable HTTP server started on %s", port)
+	}()
+	return nil
+}
+
 // Start 启动 MCP 服务
 func (s *MCPServer) Start() error {
 	logger.Info(s.ctx, "MCP server started")

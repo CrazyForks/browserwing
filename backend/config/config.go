@@ -21,6 +21,9 @@ type Config struct {
 type ServerConfig struct {
 	Port string `json:"port" toml:"port"`
 	Host string `json:"host" toml:"host"`
+
+	MCPHost string `json:"mcp_host" toml:"mcp_host"`
+	MCPPort string `json:"mcp_port" toml:"mcp_port"`
 }
 
 type DatabaseConfig struct {
