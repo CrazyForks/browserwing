@@ -93,7 +93,7 @@ MCP 服务器支持标准的 MCP 协议,提供两种调用方式:
 {
   "mcpServers": {
     "browserwing": {
-      "url": "http://localhost:8080/api/v1/mcp/message"
+      "url": "http://localhost:8080/mcp"
     }
   }
 }
@@ -101,7 +101,7 @@ MCP 服务器支持标准的 MCP 协议,提供两种调用方式:
 
 **直接 HTTP 调用:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/mcp/message \
+curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -201,7 +201,7 @@ curl http://localhost:8080/api/v1/mcp/status
 curl http://localhost:8080/api/v1/mcp/commands
 
 # 测试 HTTP 模式的 MCP 调用
-curl -X POST http://localhost:8080/api/v1/mcp/message \
+curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -216,7 +216,7 @@ curl -X POST http://localhost:8080/api/v1/mcp/message \
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/v1/mcp/message` | POST | 处理 MCP JSON-RPC 请求 |
+| `/mcp` | POST | 处理 MCP JSON-RPC 请求 |
 | `/api/v1/mcp/sse` | GET | SSE 长连接（用于事件推送） |
 | `/api/v1/mcp/status` | GET | 获取 MCP 服务状态 |
 | `/api/v1/mcp/commands` | GET | 列出所有 MCP 命令 |
@@ -225,7 +225,7 @@ curl -X POST http://localhost:8080/api/v1/mcp/message \
 
 **列出工具:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/mcp/message \
+curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -236,7 +236,7 @@ curl -X POST http://localhost:8080/api/v1/mcp/message \
 
 **调用工具:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/mcp/message \
+curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -374,7 +374,7 @@ backend/
 {
   "mcpServers": {
     "browserwing": {
-      "url": "http://localhost:8080/api/v1/mcp/message",
+      "url": "http://localhost:8080/mcp",
       "transport": "http"
     }
   }
@@ -404,7 +404,7 @@ backend/
 {
   "mcp.servers": {
     "browserwing": {
-      "url": "http://localhost:8080/api/v1/mcp/message"
+      "url": "http://localhost:8080/mcp"
     }
   }
 }
@@ -432,7 +432,7 @@ backend/
     "modelContextProtocolServers": [
       {
         "name": "browserwing",
-        "url": "http://localhost:8080/api/v1/mcp/message"
+        "url": "http://localhost:8080/mcp"
       }
     ]
   }

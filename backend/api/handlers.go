@@ -23,6 +23,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/google/uuid"
+	"github.com/mark3labs/mcp-go/server"
 )
 
 // 使用类型断言访问 MCP 服务器的 ServeHTTP 方法
@@ -30,6 +31,8 @@ type MCPHTTPHandler interface {
 	GetStatus() map[string]interface{}
 	RegisterScript(*models.Script) error
 	UnregisterScript(string)
+	ServeSteamableHTTP(http.ResponseWriter, *http.Request)
+	GetSSEServer() *server.SSEServer
 }
 
 type Handler struct {
@@ -917,18 +920,6 @@ func (h *Handler) DeleteBrowserConfig(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{"message": "browser.config.deleteSuccess"})
-}
-
-// ============= 配置相关 API =============
-
-// GetServerConfig 获取服务器配置信息
-func (h *Handler) GetServerConfig(c *gin.Context) {
-	// 只返回前端需要的配置信息
-	c.JSON(http.StatusOK, gin.H{
-		"mcp_http_port": h.config.Server.MCPHTTPPort,
-		"port":          h.config.Server.Port,
-		"host":          h.config.Server.Host,
-	})
 }
 
 // ============= MCP 相关 API =============

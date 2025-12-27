@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ type MCPServer struct {
 	// mcp-go server instance
 	mcpServer            *server.MCPServer
 	streamableHTTPServer *server.StreamableHTTPServer
+	sseServer            *server.SSEServer
 }
 
 // NewMCPServer 创建使用 mcp-go 的 MCP 服务器
@@ -58,18 +60,14 @@ func NewMCPServer(storage *storage.BoltDB, browserMgr *browser.Manager) *MCPServ
 		server.WithStateful(true),
 	)
 
-	return s
-}
+	// 创建 SSE server
+	s.sseServer = server.NewSSEServer(
+		s.mcpServer,
+		server.WithSSEEndpoint("/api/v1/mcp/sse"),
+		server.WithMessageEndpoint("/api/v1/mcp/sse_message"),
+	)
 
-func (s *MCPServer) StartHTTPServer(port string) error {
-	go func(port string) {
-		logger.Info(s.ctx, "MCP server started on port %s", port)
-		err := s.streamableHTTPServer.Start(port)
-		if err != nil {
-			logger.Error(s.ctx, "Failed to start MCP server: %v", err)
-		}
-	}(port)
-	return nil
+	return s
 }
 
 // Start 启动 MCP 服务
@@ -408,4 +406,13 @@ func (s *MCPServer) CallTool(ctx context.Context, name string, arguments map[str
 	}
 
 	return result, nil
+}
+
+func (s *MCPServer) ServeSteamableHTTP(w http.ResponseWriter, r *http.Request) {
+	logger.Info(r.Context(), "ServeHTTP: Method=%s, Path=%s, RemoteAddr=%s", r.Method, r.URL.Path, r.RemoteAddr)
+	s.streamableHTTPServer.ServeHTTP(w, r)
+}
+
+func (s *MCPServer) GetSSEServer() *server.SSEServer {
+	return s.sseServer
 }

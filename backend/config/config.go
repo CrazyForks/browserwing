@@ -2,7 +2,6 @@ package config
 
 import (
 	"os"
-	"strconv"
 
 	"github.com/browserwing/browserwing/pkg/logger"
 	"github.com/pelletier/go-toml/v2"
@@ -22,8 +21,6 @@ type Config struct {
 type ServerConfig struct {
 	Port string `json:"port" toml:"port"`
 	Host string `json:"host" toml:"host"`
-
-	MCPHTTPPort string `json:"mcp_http_port" toml:"mcp_http_port"`
 }
 
 type DatabaseConfig struct {
@@ -83,9 +80,8 @@ func Load(path string) (*Config, error) {
 		// 返回默认配置
 		defConfig := &Config{
 			Server: &ServerConfig{
-				Port:        "8080",
-				MCPHTTPPort: "8081",
-				Host:        "0.0.0.0",
+				Port: "8080",
+				Host: "0.0.0.0",
 			},
 			Database: &DatabaseConfig{
 				Path: "./data/browserwing.db",
@@ -126,15 +122,6 @@ func Load(path string) (*Config, error) {
 			MaxAge:     7,
 			Compress:   false,
 		}
-	}
-
-	if cfg.Server.MCPHTTPPort == "" {
-		// 设置为与Server.Port+1
-		port, err := strconv.Atoi(cfg.Server.Port)
-		if err != nil {
-			return nil, err
-		}
-		cfg.Server.MCPHTTPPort = strconv.Itoa(port + 1)
 	}
 
 	// 兼容处理：如果没有配置 LLMs 数组，但配置了单个 LLM，则转换为数组

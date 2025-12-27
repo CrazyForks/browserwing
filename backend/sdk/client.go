@@ -164,7 +164,7 @@ func (c *Client) initLogger() error {
 func (c *Client) initDatabase() error {
 	// 确保数据库目录存在
 	dbDir := filepath.Dir(c.config.DatabasePath)
-	
+
 	db, err := storage.NewBoltDB(c.config.DatabasePath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w (directory: %s)", err, dbDir)

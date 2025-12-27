@@ -43,9 +43,6 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 	// API路由组
 	api := r.Group("/api/v1")
 	{
-		// 配置相关
-		api.GET("/config", handler.GetServerConfig)
-
 		// 提示词相关
 		prompts := api.Group("/prompts")
 		{
@@ -120,6 +117,9 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 			mcp.GET("/status", handler.GetMCPStatus)             // 获取 MCP 服务状态
 			mcp.GET("/commands", handler.ListMCPCommands)        // 列出所有 MCP 命令
 			mcp.GET("/commands_all", handler.ListMCPCommandsAll) // 列出所有 MCP 命令
+
+			mcp.Any("/sse", gin.WrapH(handler.mcpServer.GetSSEServer().SSEHandler()))
+			mcp.Any("/sse_message", gin.WrapH(handler.mcpServer.GetSSEServer().MessageHandler()))
 		}
 
 		// LLM 配置管理
@@ -196,6 +196,12 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 			path := strings.TrimPrefix(c.Request.URL.Path, "/")
 			if path == "" {
 				path = "index.html"
+			}
+
+			// 如果是以 mcp 开头的
+			if strings.HasPrefix(path, "api/v1/mcp/message") {
+				handler.mcpServer.ServeSteamableHTTP(c.Writer, c.Request)
+				return
 			}
 
 			// 尝试读取文件
