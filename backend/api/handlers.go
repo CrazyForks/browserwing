@@ -86,6 +86,25 @@ func (h *Handler) StopBrowser(c *gin.Context) {
 		return
 	}
 
+	// 获取当前浏览器的所有 Cookie
+	cookies, err := h.browserManager.GetCurrentPageCookies()
+	if err != nil {
+		logger.Error(c.Request.Context(), "Failed to get current page cookies: %v", err)
+	} else {
+		// 保存到数据库，使用固定 ID "browser"
+		cookieStore := &models.CookieStore{
+			ID:       "browser",
+			Platform: "browser",
+			Cookies:  cookies.([]*proto.NetworkCookie),
+		}
+
+		if err := h.db.SaveCookies(cookieStore); err != nil {
+			logger.Error(c.Request.Context(), "Failed to save cookies: %v", err)
+		} else {
+			logger.Info(c.Request.Context(), "Saved %d cookies", len(cookieStore.Cookies))
+		}
+	}
+
 	if err := h.browserManager.Stop(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.stopBrowserFailed"})
 		return
