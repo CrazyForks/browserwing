@@ -626,15 +626,31 @@ func (h *Handler) PlayScript(c *gin.Context) {
 		}
 	}
 
+	// 检查浏览器是否运行
+	if !h.browserManager.IsRunning() {
+		logger.Info(c, "Browser not running, starting...")
+		if err := h.browserManager.Start(c); err != nil {
+			logger.Error(c.Request.Context(), "Failed to start browser: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "error.playScriptFailed"})
+			return
+		}
+	}
+
 	// 执行回放
 	result, err := h.browserManager.PlayScript(c.Request.Context(), scriptToRun)
 	if err != nil {
+		logger.Error(c.Request.Context(), "Failed to play script: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":  "error.playScriptFailed",
 			"result": result,
 		})
 		return
 	}
+
+	// 关闭页面
+	if err := h.browserManager.CloseActivePage(c.Request.Context()); err != nil {
+		logger.Warn(c.Request.Context(), "Failed to close page: %v", err)		
+	}	
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "success.scriptPlaybackCompleted",

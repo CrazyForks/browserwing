@@ -588,7 +588,7 @@ func (m *Manager) getConfigForURL(url string) *models.BrowserConfig {
 				logger.Info(ctx, fmt.Sprintf("✓ URL %s matched pattern %s (configuration: %s)", url, config.URLPattern, config.Name))
 				return config
 			} else {
-				logger.Info(ctx, fmt.Sprintf("✗ Not matched"))
+				logger.Info(ctx, "✗ Not matched")
 			}
 		}
 	}
