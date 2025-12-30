@@ -587,9 +587,14 @@ func (h *Handler) DeleteScript(c *gin.Context) {
 func (h *Handler) PlayScript(c *gin.Context) {
 	id := c.Param("id")
 
+	// 检查浏览器是否运行
 	if !h.browserManager.IsRunning() {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "error.browserNotRunning"})
-		return
+		logger.Info(c, "Browser not running, starting...")
+		if err := h.browserManager.Start(c); err != nil {
+			logger.Error(c.Request.Context(), "Failed to start browser: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "error.playScriptFailed"})
+			return
+		}
 	}
 
 	// 获取脚本
@@ -642,16 +647,6 @@ func (h *Handler) PlayScript(c *gin.Context) {
 				}
 				scriptToRun.Actions[i].FilePaths = newFilePaths
 			}
-		}
-	}
-
-	// 检查浏览器是否运行
-	if !h.browserManager.IsRunning() {
-		logger.Info(c, "Browser not running, starting...")
-		if err := h.browserManager.Start(c); err != nil {
-			logger.Error(c.Request.Context(), "Failed to start browser: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "error.playScriptFailed"})
-			return
 		}
 	}
 
