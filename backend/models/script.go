@@ -120,20 +120,30 @@ type Script struct {
 }
 
 func (s *Script) Copy() *Script {
+
+	actions := make([]ScriptAction, len(s.Actions))
+	copy(actions, s.Actions)
+
+	downloadedFiles := make([]DownloadedFile, len(s.DownloadedFiles))
+	copy(downloadedFiles, s.DownloadedFiles)
+
+	tags := make([]string, len(s.Tags))
+	copy(tags, s.Tags)
+
 	return &Script{
 		ID:                    s.ID,
 		Name:                  s.Name,
 		Description:           s.Description,
 		URL:                   s.URL,
-		Actions:               s.Actions,
+		Actions:               actions,
 		CreatedAt:             s.CreatedAt,
 		UpdatedAt:             s.UpdatedAt,
-		Tags:                  s.Tags,
+		Tags:                  tags,
 		Group:                 s.Group,
 		Duration:              s.Duration,
 		CanPublish:            s.CanPublish,
 		CanFetch:              s.CanFetch,
-		DownloadedFiles:       s.DownloadedFiles,
+		DownloadedFiles:       downloadedFiles,
 		IsMCPCommand:          s.IsMCPCommand,
 		MCPCommandName:        s.MCPCommandName,
 		MCPCommandDescription: s.MCPCommandDescription,

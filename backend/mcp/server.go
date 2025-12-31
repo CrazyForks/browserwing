@@ -357,7 +357,7 @@ func (s *MCPServer) CallTool(ctx context.Context, name string, arguments map[str
 		return nil, fmt.Errorf("command not found: %s", name)
 	}
 
-	logger.Info(ctx, "CallTool: Executing MCP command: %s (script: %s)", name, script.Name)
+	logger.Info(ctx, "CallTool: Executing MCP command: %s (script: %s), arguments %+v", name, script.Name, arguments)
 
 	// 检查浏览器是否运行
 	if !s.browserMgr.IsRunning() {
