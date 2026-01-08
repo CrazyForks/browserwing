@@ -7,6 +7,8 @@ if (window.__browserwingRecorder__) {
 	window.__lastInputTime__ = {};
 	window.__inputTimers__ = {};
 	window.__extractMode__ = false; // 数据抓取模式标志
+	window.__extractType__ = 'text'; // 数据抓取类型: 'text', 'html', 'attribute'
+	window.__menuTrigger__ = null; // 菜单触发方式: 'button' 或 'contextmenu'
 	window.__aiExtractMode__ = false; // AI提取模式标志
 	window.__aiFormFillMode__ = false; // AI填充表单模式标志
 	window.__recorderUI__ = null; // 录制器 UI 元素
@@ -72,9 +74,22 @@ if (window.__browserwingRecorder__) {
 				this.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
 			}
 		};
-		extractBtn.onclick = function() {
-			if (!panel.__isDragging) {
+		extractBtn.onclick = function(e) {
+			if (panel.__isDragging) return;
+			
+			if (window.__extractMode__) {
+				// 如果已经在抓取模式，退出模式
 				toggleExtractMode();
+			} else {
+				// 显示抓取类型选择菜单
+				window.__menuTrigger__ = 'button';
+				var menu = window.__recorderUI__.menu;
+				menu.style.display = 'block';
+				
+				// 计算菜单位置（在按钮下方）
+				var btnRect = this.getBoundingClientRect();
+				menu.style.left = btnRect.left + 'px';
+				menu.style.top = (btnRect.bottom + 5) + 'px';
 			}
 		};
 		
@@ -231,6 +246,47 @@ if (window.__browserwingRecorder__) {
 			item.textContent = menuItems[i].label;
 			item.onmouseover = function() { this.style.background = '#f1f5f9'; this.style.color = '#0f172a'; };
 			item.onmouseout = function() { this.style.background = 'transparent'; this.style.color = '#334155'; };
+			
+			// 统一的菜单项点击处理
+			item.onclick = function() {
+				var extractType = this.getAttribute('data-type');
+				var ui = window.__recorderUI__;
+				
+				if (window.__menuTrigger__ === 'button') {
+					// 从按钮点击显示的菜单：设置抓取类型并进入模式
+					window.__extractType__ = extractType;
+					menu.style.display = 'none';
+					
+					// 进入抓取模式
+					if (!window.__extractMode__) {
+						toggleExtractMode();
+					}
+					
+					// 更新提示信息
+					var modeText = '{{EXTRACT_MODE_ENABLED}}';
+					if (extractType === 'text') {
+						modeText = '{{EXTRACT_TEXT_MODE}}';
+					} else if (extractType === 'html') {
+						modeText = '{{EXTRACT_HTML_MODE}}';
+					} else if (extractType === 'attribute') {
+						modeText = '{{EXTRACT_ATTRIBUTE_MODE}}';
+					}
+					showCurrentAction(modeText);
+				} else if (window.__menuTrigger__ === 'contextmenu') {
+					// 从右键显示的菜单：直接抓取当前元素
+					if (extractType === 'attribute') {
+						// 弹出对话框让用户输入属性名
+						var attrName = prompt('{{PROMPT_ATTRIBUTE}}', 'href');
+						if (attrName) {
+							recordExtractAction(ui.currentElement, extractType, attrName);
+						}
+					} else {
+						recordExtractAction(ui.currentElement, extractType, null);
+					}
+					menu.style.display = 'none';
+				}
+			};
+			
 			menu.appendChild(item);
 		}
 		
@@ -482,7 +538,19 @@ if (window.__browserwingRecorder__) {
 		
 		if (window.__extractMode__) {
 			// 开启抓取模式
-			ui.extractBtn.textContent = '{{EXIT_EXTRACT}}';
+			var extractType = window.__extractType__ || 'text';
+			var modeLabel = '{{EXIT_EXTRACT}}';
+			
+			// 根据抓取类型显示不同的按钮文本
+			if (extractType === 'text') {
+				modeLabel = '{{EXIT_EXTRACT_TEXT}}';
+			} else if (extractType === 'html') {
+				modeLabel = '{{EXIT_EXTRACT_HTML}}';
+			} else if (extractType === 'attribute') {
+				modeLabel = '{{EXIT_EXTRACT_ATTR}}';
+			}
+			
+			ui.extractBtn.textContent = modeLabel;
 			ui.extractBtn.style.background = '#1f2937';
 			ui.extractBtn.style.color = 'white';
 			ui.extractBtn.style.borderColor = '#1f2937';
@@ -493,8 +561,18 @@ if (window.__browserwingRecorder__) {
 				this.style.background = '#1f2937';
 			};
 			document.body.style.cursor = 'crosshair';
-			showCurrentAction('{{EXTRACT_MODE_ENABLED}}');
-			console.log('[BrowserWing] Extract mode enabled');
+			
+			// 根据抓取类型显示不同的提示
+			var modeText = '{{EXTRACT_MODE_ENABLED}}';
+			if (extractType === 'text') {
+				modeText = '{{EXTRACT_TEXT_MODE}}';
+			} else if (extractType === 'html') {
+				modeText = '{{EXTRACT_HTML_MODE}}';
+			} else if (extractType === 'attribute') {
+				modeText = '{{EXTRACT_ATTRIBUTE_MODE}}';
+			}
+			showCurrentAction(modeText);
+			console.log('[BrowserWing] Extract mode enabled, type:', extractType);
 		} else {
 			// 关闭抓取模式
 			ui.extractBtn.textContent = '{{DATA_EXTRACT}}';
@@ -1873,7 +1951,18 @@ if (window.__browserwingRecorder__) {
 			if (window.__extractMode__) {
 				e.preventDefault();
 				e.stopPropagation();
-				recordExtractAction(target, 'text', null);
+				
+				// 使用当前选择的抓取类型
+				var extractType = window.__extractType__ || 'text';
+				if (extractType === 'attribute') {
+					// 如果是属性抓取，弹出对话框让用户输入属性名
+					var attrName = prompt('{{PROMPT_ATTRIBUTE}}', 'href');
+					if (attrName) {
+						recordExtractAction(target, extractType, attrName);
+					}
+				} else {
+					recordExtractAction(target, extractType, null);
+				}
 				return false;
 			}
 			
@@ -2310,30 +2399,13 @@ if (window.__browserwingRecorder__) {
 		var ui = window.__recorderUI__;
 		ui.currentElement = target;
 		
+		// 设置菜单触发方式为右键
+		window.__menuTrigger__ = 'contextmenu';
+		
 		// 显示菜单
 		ui.menu.style.display = 'block';
 		ui.menu.style.left = e.pageX + 'px';
 		ui.menu.style.top = e.pageY + 'px';
-		
-		// 绑定菜单项点击事件
-		var menuItems = ui.menu.querySelectorAll('[data-type]');
-		for (var i = 0; i < menuItems.length; i++) {
-			menuItems[i].onclick = function() {
-				var extractType = this.getAttribute('data-type');
-				
-				if (extractType === 'attribute') {
-					// 弹出对话框让用户输入属性名
-					var attrName = prompt('{{PROMPT_ATTRIBUTE}}', 'href');
-					if (attrName) {
-						recordExtractAction(ui.currentElement, extractType, attrName);
-					}
-				} else {
-					recordExtractAction(ui.currentElement, extractType, null);
-				}
-				
-				ui.menu.style.display = 'none';
-			};
-		}
 		
 		return false;
 	}, true);
