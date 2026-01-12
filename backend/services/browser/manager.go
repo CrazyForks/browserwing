@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -980,12 +981,12 @@ func (m *Manager) checkInPageRecordingRequests(ctx context.Context, page *rod.Pa
 
 // isHeadlessEnvironment 检测当前环境是否为无GUI环境
 func isHeadlessEnvironment() bool {
-	// 检查是否在 Docker 容器中
+	// 1. 优先检查是否在 Docker 容器中
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return true
 	}
 
-	// 检查 cgroup 文件是否包含 docker 或 containerd 标识
+	// 2. 检查 cgroup 文件是否包含 docker 或 containerd 标识（仅限 Linux）
 	if data, err := os.ReadFile("/proc/1/cgroup"); err == nil {
 		content := string(data)
 		if strings.Contains(content, "docker") || strings.Contains(content, "containerd") {
@@ -993,15 +994,30 @@ func isHeadlessEnvironment() bool {
 		}
 	}
 
-	// Linux 环境下检查 DISPLAY 和 WAYLAND_DISPLAY 环境变量
-	display := os.Getenv("DISPLAY")
-	waylandDisplay := os.Getenv("WAYLAND_DISPLAY")
-
-	// 如果两个环境变量都为空，则认为是无GUI环境
-	if display == "" && waylandDisplay == "" {
-		return true
+	// 3. 根据操作系统类型判断
+	osType := strings.ToLower(os.Getenv("GOOS"))
+	if osType == "" {
+		// 如果 GOOS 环境变量不存在，使用 runtime.GOOS
+		osType = strings.ToLower(runtime.GOOS)
 	}
 
+	// Windows 和 macOS 默认有 GUI 环境
+	if osType == "windows" || osType == "darwin" {
+		return false
+	}
+
+	// 4. Linux 环境下检查 DISPLAY 和 WAYLAND_DISPLAY 环境变量
+	if osType == "linux" {
+		display := os.Getenv("DISPLAY")
+		waylandDisplay := os.Getenv("WAYLAND_DISPLAY")
+
+		// 如果两个环境变量都为空，则认为是无GUI环境
+		if display == "" && waylandDisplay == "" {
+			return true
+		}
+	}
+
+	// 默认认为有 GUI 环境
 	return false
 }
 
@@ -1018,11 +1034,13 @@ func (m *Manager) getDefaultBrowserConfig() *models.BrowserConfig {
 	headless := isHeadlessEnvironment()
 
 	// 记录环境检测结果
-	reason := "检测到GUI环境，默认启用有界面模式"
-	if headless {
-		reason = "检测到无GUI环境，默认启用headless模式"
-	}
-	logger.Info(context.Background(), "检测浏览器运行环境: headless=%v, %s", headless, reason)
+	osType := runtime.GOOS
+	display := os.Getenv("DISPLAY")
+	waylandDisplay := os.Getenv("WAYLAND_DISPLAY")
+
+	logger.Info(context.Background(),
+		"detected browser environment: OS=%s, DISPLAY=%s, WAYLAND_DISPLAY=%s, headless=%v",
+		osType, display, waylandDisplay, headless)
 
 	return &models.BrowserConfig{
 		ID:          "default",
