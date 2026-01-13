@@ -40,14 +40,14 @@ export default function ScriptParamsDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    
-    // 检查是否所有参数都已填写
-    const hasEmptyValues = parameters.some(param => !paramValues[param]?.trim())
-    if (hasEmptyValues) {
-      alert(t('script.params.fillAllRequired') || '请填写所有必需参数')
-      return
-    }
-    
+
+    // // 检查是否所有参数都已填写
+    // const hasEmptyValues = parameters.some(param => !paramValues[param]?.trim())
+    // if (hasEmptyValues) {
+    //   alert(t('script.params.fillAllRequired') || '请填写所有必需参数')
+    //   return
+    // }
+
     onConfirm(paramValues)
   }
 
@@ -93,7 +93,6 @@ export default function ScriptParamsDialog({
                 <div key={index}>
                   <label className="block text-base font-medium text-gray-900 dark:text-gray-100 mb-2">
                     {param}
-                    <span className="text-red-500 dark:text-red-400 ml-1">*</span>
                   </label>
                   <input
                     type="text"
@@ -104,7 +103,6 @@ export default function ScriptParamsDialog({
                              focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500 focus:border-transparent
                              bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500
                              transition-colors"
-                    required
                   />
                 </div>
               ))}

@@ -230,6 +230,11 @@ func (s *MCPServer) createToolHandler(script *models.Script) func(ctx context.Co
 				for key, value := range argsMap {
 					params[key] = fmt.Sprintf("%v", value)
 				}
+				for key := range scriptToRun.Variables {
+					if _, ok := params[key]; ok {
+						scriptToRun.Variables[key] = params[key]
+					}
+				}
 			}
 		}
 
@@ -385,6 +390,12 @@ func (s *MCPServer) CallTool(ctx context.Context, name string, arguments map[str
 
 	for key, value := range arguments {
 		params[key] = fmt.Sprintf("%v", value)
+	}
+
+	for key := range scriptToRun.Variables {
+		if _, ok := params[key]; ok {
+			scriptToRun.Variables[key] = params[key]
+		}
 	}
 
 	// 替换占位符

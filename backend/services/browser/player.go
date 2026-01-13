@@ -422,6 +422,15 @@ func (p *Player) PlayScript(ctx context.Context, page *rod.Page, script *models.
 	// 重置统计和抓取数据
 	p.ResetStats()
 
+	// 初始化变量上下文（包含脚本预设变量）
+	variables := make(map[string]string)
+	if script.Variables != nil {
+		for k, v := range script.Variables {
+			variables[k] = v
+			logger.Info(ctx, "Initialize variable: %s = %s", k, v)
+		}
+	}
+
 	// 初始化多标签页支持
 	p.pages = make(map[int]*rod.Page)
 	p.tabCounter = 0
@@ -445,12 +454,32 @@ func (p *Player) PlayScript(ctx context.Context, page *rod.Page, script *models.
 	for i, action := range script.Actions {
 		logger.Info(ctx, "[%d/%d] Execute action: %s", i+1, len(script.Actions), action.Type)
 
+		// 检查条件执行
+		if action.Condition != nil && action.Condition.Enabled {
+			shouldExecute, err := p.evaluateCondition(ctx, action.Condition, variables)
+			if err != nil {
+				logger.Warn(ctx, "Failed to evaluate condition: %v", err)
+			} else if !shouldExecute {
+				logger.Info(ctx, "Skipping action due to condition not met: %s %s %s",
+					action.Condition.Variable, action.Condition.Operator, action.Condition.Value)
+				continue
+			}
+			logger.Info(ctx, "Condition met, executing action: %s %s %s",
+				action.Condition.Variable, action.Condition.Operator, action.Condition.Value)
+		}
+
 		if err := p.executeAction(ctx, page, action); err != nil {
 			logger.Warn(ctx, "Action execution failed (continuing with subsequent steps): %v", err)
 			p.failCount++
 			// 不要中断，继续执行下一步
 		} else {
 			p.successCount++
+
+			// 如果 action 提取了数据，更新变量上下文
+			if action.VariableName != "" && p.extractedData[action.VariableName] != nil {
+				variables[action.VariableName] = fmt.Sprintf("%v", p.extractedData[action.VariableName])
+				logger.Info(ctx, "Updated variable from extracted data: %s = %s", action.VariableName, variables[action.VariableName])
+			}
 		}
 
 		// 操作之间稍微等待，模拟真实用户行为
@@ -468,6 +497,120 @@ func (p *Player) PlayScript(ctx context.Context, page *rod.Page, script *models.
 	}
 
 	return nil
+}
+
+// evaluateCondition 评估操作执行条件
+func (p *Player) evaluateCondition(ctx context.Context, condition *models.ActionCondition, variables map[string]string) (bool, error) {
+	if condition == nil {
+		return true, nil
+	}
+
+	varName := condition.Variable
+	operator := condition.Operator
+	expectedValue := condition.Value
+
+	// 处理 exists 和 not_exists 操作符
+	if operator == "exists" {
+		_, exists := variables[varName]
+		return exists, nil
+	}
+	if operator == "not_exists" {
+		_, exists := variables[varName]
+		return !exists, nil
+	}
+
+	// 获取变量值
+	actualValue, exists := variables[varName]
+	if !exists {
+		logger.Warn(ctx, "Variable not found for condition: %s", varName)
+		return false, fmt.Errorf("variable not found: %s", varName)
+	}
+
+	// 根据操作符进行比较
+	switch operator {
+	case "=", "==":
+		return actualValue == expectedValue, nil
+
+	case "!=":
+		return actualValue != expectedValue, nil
+
+	case ">":
+		// 尝试数值比较
+		return compareNumeric(actualValue, expectedValue, ">")
+
+	case "<":
+		return compareNumeric(actualValue, expectedValue, "<")
+
+	case ">=":
+		return compareNumeric(actualValue, expectedValue, ">=")
+
+	case "<=":
+		return compareNumeric(actualValue, expectedValue, "<=")
+
+	case "in":
+		// 检查 actualValue 是否包含在 expectedValue 中（逗号分隔）
+		values := strings.Split(expectedValue, ",")
+		for _, v := range values {
+			if strings.TrimSpace(v) == actualValue {
+				return true, nil
+			}
+		}
+		return false, nil
+
+	case "not_in":
+		values := strings.Split(expectedValue, ",")
+		for _, v := range values {
+			if strings.TrimSpace(v) == actualValue {
+				return false, nil
+			}
+		}
+		return true, nil
+
+	case "contains":
+		return strings.Contains(actualValue, expectedValue), nil
+
+	case "not_contains":
+		return !strings.Contains(actualValue, expectedValue), nil
+
+	default:
+		return false, fmt.Errorf("unsupported operator: %s", operator)
+	}
+}
+
+// compareNumeric 数值比较辅助函数
+func compareNumeric(actual, expected, operator string) (bool, error) {
+	// 尝试将字符串转换为浮点数进行比较
+	var actualNum, expectedNum float64
+	_, err1 := fmt.Sscanf(actual, "%f", &actualNum)
+	_, err2 := fmt.Sscanf(expected, "%f", &expectedNum)
+
+	if err1 != nil || err2 != nil {
+		// 如果无法转换为数字，则进行字符串比较
+		switch operator {
+		case ">":
+			return actual > expected, nil
+		case "<":
+			return actual < expected, nil
+		case ">=":
+			return actual >= expected, nil
+		case "<=":
+			return actual <= expected, nil
+		}
+	}
+
+	// 数值比较
+	switch operator {
+	case ">":
+		return actualNum > expectedNum, nil
+	case "<":
+		return actualNum < expectedNum, nil
+	case ">=":
+		return actualNum >= expectedNum, nil
+	case "<=":
+		return actualNum <= expectedNum, nil
+	}
+
+	return false, fmt.Errorf("unsupported numeric operator: %s", operator)
 }
 
 // executeAction 执行单个操作

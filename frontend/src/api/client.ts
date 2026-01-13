@@ -233,6 +233,14 @@ export interface ScriptAction {
     ax_node_id?: string
     confidence?: number
   }
+  
+  // 条件执行
+  condition?: {
+    variable: string      // 变量名
+    operator: string      // 操作符: =, !=, >, <, >=, <=, in, not_in, contains, not_contains, exists, not_exists
+    value: string         // 比较值
+    enabled?: boolean     // 是否启用条件
+  }
 }
 
 export interface Script {

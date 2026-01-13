@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import api, { Script, ScriptAction, RecordingConfig, ScriptExecution } from '../api/client'
-import { Lightbulb, RefreshCw, Play, Trash2, Clock, FileCode, ChevronDown, ChevronUp, Edit2, X, Check, ExternalLink, GripVertical, Download, Upload, CheckSquare, Square, Copy, Tag, Folder, HelpCircle, Clipboard, Plus } from 'lucide-react'
+import { Lightbulb, RefreshCw, Play, Trash2, Clock, FileCode, ChevronDown, ChevronUp, Edit2, X, Check, ExternalLink, GripVertical, Download, Upload, CheckSquare, Square, Copy, Tag, Folder, HelpCircle, Clipboard, Plus, Variable } from 'lucide-react'
 import Toast from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import ScriptParamsDialog from '../components/ScriptParamsDialog'
@@ -93,7 +93,7 @@ export default function ScriptManager() {
   const [showImportConfirm, setShowImportConfirm] = useState(false)
   const [importData, setImportData] = useState<any>(null)
   const [duplicateScriptIds, setDuplicateScriptIds] = useState<string[]>([])
-  
+
   // 导入方式相关
   const [showImportMenu, setShowImportMenu] = useState(false)
   const [showJSONImportDialog, setShowJSONImportDialog] = useState(false)
@@ -135,11 +135,11 @@ export default function ScriptManager() {
   // 点击外部区域关闭导入下拉菜单
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (showImportMenu && 
-          importMenuRef.current && 
-          importButtonRef.current && 
-          !importMenuRef.current.contains(event.target as Node) && 
-          !importButtonRef.current.contains(event.target as Node)) {
+      if (showImportMenu &&
+        importMenuRef.current &&
+        importButtonRef.current &&
+        !importMenuRef.current.contains(event.target as Node) &&
+        !importButtonRef.current.contains(event.target as Node)) {
         setShowImportMenu(false)
       }
     }
@@ -320,6 +320,24 @@ export default function ScriptManager() {
             description: `${varName} ${t('script.param.description')}`
           }
         })
+
+        // 拼接上脚本变量
+        if (script && script.variables) {
+          Object.keys(script.variables).forEach(varName => {
+            // 如果值为 true/false，则类型设置为 boolean
+            if (script.variables && typeof script.variables[varName] === 'boolean') {
+              properties[varName] = {
+                type: 'boolean',
+                description: `${varName} ${t('script.param.description')}`
+              }
+            } else {
+              properties[varName] = {
+                type: 'string',
+                description: `${varName} ${t('script.param.description')}`
+              }
+            }
+          })
+        }
 
         const autoSchema = {
           type: 'object',
@@ -836,12 +854,12 @@ export default function ScriptManager() {
               url: script.url,
               actions: script.actions,
             }
-            
+
             // 如果导入数据包含变量，则更新变量
             if (script.variables !== undefined) {
               updateData.variables = script.variables
             }
-            
+
             // 如果导入数据包含MCP信息，则更新MCP信息
             if (script.is_mcp_command !== undefined) {
               updateData.is_mcp_command = script.is_mcp_command
@@ -855,7 +873,7 @@ export default function ScriptManager() {
             if (script.mcp_input_schema !== undefined) {
               updateData.mcp_input_schema = script.mcp_input_schema
             }
-            
+
             await api.updateScript(script.id, updateData)
             successCount++
           } else {
@@ -879,12 +897,12 @@ export default function ScriptManager() {
               can_publish: script.can_publish || false,
               can_fetch: script.can_fetch || false,
             }
-            
+
             // 如果导入数据包含变量，则设置变量
             if (script.variables !== undefined) {
               createData.variables = script.variables
             }
-            
+
             // 如果导入数据包含MCP信息，则设置MCP信息
             if (script.is_mcp_command !== undefined) {
               createData.is_mcp_command = script.is_mcp_command
@@ -898,7 +916,7 @@ export default function ScriptManager() {
             if (script.mcp_input_schema !== undefined) {
               createData.mcp_input_schema = script.mcp_input_schema
             }
-            
+
             await api.createScript(createData)
             successCount++
           }
@@ -1736,16 +1754,17 @@ export default function ScriptManager() {
                             {/* 变量管理区域 */}
                             {(isEditing || (script.variables && Object.keys(script.variables).length > 0)) && (
                               <div className="mt-3 pb-3 border-b border-gray-200 dark:border-gray-700">
-                                <h4 className="text-base font-semibold text-gray-800 dark:text-gray-200 mb-3">
+                                <h4 className="text-base font-semibold text-gray-800 dark:text-gray-200 mb-3 flex items-center">
+                                  <Variable className="w-5 h-5 mr-2" />
                                   {t('script.editor.variables.title') || '脚本变量'}
                                 </h4>
-                                
+
                                 {isEditing ? (
                                   <div className="space-y-3">
                                     <p className="text-xs text-gray-500 dark:text-gray-400">
                                       {t('script.editor.variables.description') || '定义可在脚本中使用的变量，使用 ${变量名} 引用。外部调用时可传入参数覆盖这些默认值。'}
                                     </p>
-                                    
+
                                     {/* 现有变量列表 */}
                                     {Object.keys(editingVariables).length > 0 && (
                                       <div className="space-y-2">
@@ -1772,7 +1791,7 @@ export default function ScriptManager() {
                                         ))}
                                       </div>
                                     )}
-                                    
+
                                     {/* 添加新变量 */}
                                     <div className="flex items-center gap-2 pt-2">
                                       <input
@@ -1844,15 +1863,15 @@ export default function ScriptManager() {
                                       <span>{t('script.editor.addAction')}</span>
                                       <ChevronDown className={`w-4 h-4 transition-transform ${showAddActionMenu ? 'rotate-180' : ''}`} />
                                     </button>
-                                    
+
                                     {showAddActionMenu && (
                                       <>
                                         {/* 遮罩层用于点击外部关闭菜单 */}
-                                        <div 
-                                          className="fixed inset-0 z-10" 
+                                        <div
+                                          className="fixed inset-0 z-10"
                                           onClick={() => setShowAddActionMenu(false)}
                                         />
-                                        
+
                                         {/* 下拉菜单 */}
                                         <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 z-20 max-h-96 overflow-y-auto">
                                           {/* 基础操作 */}
@@ -2052,20 +2071,32 @@ export default function ScriptManager() {
                                     strategy={verticalListSortingStrategy}
                                   >
                                     <div className="space-y-2">
-                                      {editingActions.map((action, index) => (
-                                        <SortableActionItem
-                                        key={index}
-                                        id={index.toString()}
-                                        action={action}
-                                        index={index}
-                                        onUpdate={handleUpdateActionValue}
-                                        onDelete={handleDeleteAction}
-                                        onDuplicate={handleDuplicateAction}
-                                        onCopyToClipboard={handleCopyActionToClipboard}
-                                        onPaste={handlePasteAction}
-                                        hasCopiedAction={!!copiedAction}
-                                      />
-                                      ))}
+                                      {editingActions.map((action, index) => {
+                                        // 收集可用变量：预设变量 + 前面步骤提取的变量
+                                        const availableVars = new Set<string>(Object.keys(editingVariables))
+                                        // 添加前面步骤中定义的变量
+                                        editingActions.slice(0, index).forEach(prevAction => {
+                                          if (prevAction.variable_name) {
+                                            availableVars.add(prevAction.variable_name)
+                                          }
+                                        })
+
+                                        return (
+                                          <SortableActionItem
+                                            key={index}
+                                            id={index.toString()}
+                                            action={action}
+                                            index={index}
+                                            onUpdate={handleUpdateActionValue}
+                                            onDelete={handleDeleteAction}
+                                            onDuplicate={handleDuplicateAction}
+                                            onCopyToClipboard={handleCopyActionToClipboard}
+                                            onPaste={handlePasteAction}
+                                            hasCopiedAction={!!copiedAction}
+                                            availableVariables={Array.from(availableVars)}
+                                          />
+                                        )
+                                      })}
                                     </div>
                                   </SortableContext>
                                 </DndContext>
@@ -3056,9 +3087,10 @@ interface SortableActionItemProps {
   onCopyToClipboard: (index: number) => void
   onPaste: (index: number) => void
   hasCopiedAction: boolean
+  availableVariables?: string[]  // 可用的变量列表
 }
 
-function SortableActionItem({ id, action, index, onUpdate, onDelete, onDuplicate, onCopyToClipboard, onPaste, hasCopiedAction }: SortableActionItemProps) {
+function SortableActionItem({ id, action, index, onUpdate, onDelete, onDuplicate, onCopyToClipboard, onPaste, hasCopiedAction, availableVariables }: SortableActionItemProps) {
   const { t } = useLanguage()
   const [isSemanticExpanded, setIsSemanticExpanded] = useState(false)
   const {
@@ -3098,38 +3130,38 @@ function SortableActionItem({ id, action, index, onUpdate, onDelete, onDuplicate
             <span className="font-semibold text-base text-gray-900 dark:text-gray-100">{t(action.type)}</span>
           </div>
           <div className="space-y-3">
-            {action.type !== 'sleep' && 
-              action.type !== 'wait' && 
-              action.type !== 'execute_js' && 
-              action.type !== 'upload_file' && 
-              action.type !== 'scroll' && 
+            {action.type !== 'sleep' &&
+              action.type !== 'wait' &&
+              action.type !== 'execute_js' &&
+              action.type !== 'upload_file' &&
+              action.type !== 'scroll' &&
               action.type !== 'keyboard' &&
               action.type !== 'switch_tab' &&
               action.type !== 'open_tab' &&
               action.type !== 'switch_active_tab' && (
-              <>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">{t('script.action.selector')}</label>
-                  <input
-                    type="text"
-                    value={action.selector}
-                    onChange={(e) => onUpdate(index, 'selector', e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg font-mono bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="CSS 选择器"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">XPath:</label>
-                  <input
-                    type="text"
-                    value={action.xpath || ''}
-                    onChange={(e) => onUpdate(index, 'xpath', e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg font-mono bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="XPath 路径"
-                  />
-                </div>
-              </>
-            )}
+                <>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">{t('script.action.selector')}</label>
+                    <input
+                      type="text"
+                      value={action.selector}
+                      onChange={(e) => onUpdate(index, 'selector', e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg font-mono bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="CSS 选择器"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">XPath:</label>
+                    <input
+                      type="text"
+                      value={action.xpath || ''}
+                      onChange={(e) => onUpdate(index, 'xpath', e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg font-mono bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="XPath 路径"
+                    />
+                  </div>
+                </>
+              )}
             {action.type === 'upload_file' && (
               <>
                 <div>
@@ -3387,6 +3419,105 @@ function SortableActionItem({ id, action, index, onUpdate, onDelete, onDuplicate
             />
           </div>
 
+          {/* 条件执行设置 */}
+          <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {t('script.action.conditionalExecution') || '条件执行'}
+              </label>
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={action.condition?.enabled || false}
+                  onChange={(e) => {
+                    const newCondition = action.condition || { variable: '', operator: '=', value: '', enabled: false }
+                    onUpdate(index, 'condition', { ...newCondition, enabled: e.target.checked } as any)
+                  }}
+                  className="mr-2"
+                />
+                <span className="text-xs text-gray-600 dark:text-gray-400">
+                  {t('script.action.enableCondition') || '启用'}
+                </span>
+              </label>
+            </div>
+
+            {action.condition?.enabled && (
+              <div className="grid grid-cols-3 gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <div>
+                  <label className="text-xs text-gray-600 dark:text-gray-400 block mb-1">
+                    {t('script.action.conditionVariable') || '变量'}
+                  </label>
+                  {availableVariables && availableVariables.length > 0 ? (
+                    <select
+                      value={action.condition?.variable || ''}
+                      onChange={(e) => {
+                        const newCondition = { ...action.condition, variable: e.target.value }
+                        onUpdate(index, 'condition', newCondition as any)
+                      }}
+                      className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 dark:text-gray-100"
+                    >
+                      <option value="">{t('script.action.selectVariable') || '选择变量'}</option>
+                      {availableVariables.map(varName => (
+                        <option key={varName} value={varName}>{varName}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="text-xs text-amber-600 dark:text-amber-400 italic px-2 py-1 bg-amber-50 dark:bg-amber-900/20 rounded border border-amber-200 dark:border-amber-800">
+                      {t('script.action.noVariablesHint') || '请先在上方添加脚本变量'}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600 dark:text-gray-400 block mb-1">
+                    {t('script.action.conditionOperator') || '操作符'}
+                  </label>
+                  <select
+                    value={action.condition?.operator || '='}
+                    onChange={(e) => {
+                      const newCondition = { ...action.condition, operator: e.target.value }
+                      onUpdate(index, 'condition', newCondition as any)
+                    }}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 dark:text-gray-100"
+                  >
+                    <option value="=">=</option>
+                    <option value="!=">!=</option>
+                    <option value=">">&gt;</option>
+                    <option value="<">&lt;</option>
+                    <option value=">=">&gt;=</option>
+                    <option value="<=">&lt;=</option>
+                    <option value="in">in</option>
+                    <option value="not_in">not in</option>
+                    <option value="contains">contains</option>
+                    <option value="not_contains">not contains</option>
+                    <option value="exists">exists</option>
+                    <option value="not_exists">not exists</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600 dark:text-gray-400 block mb-1">
+                    {t('script.action.conditionValue') || '值'}
+                  </label>
+                  <input
+                    type="text"
+                    value={action.condition?.value || ''}
+                    onChange={(e) => {
+                      const newCondition = { ...action.condition, value: e.target.value }
+                      onUpdate(index, 'condition', newCondition as any)
+                    }}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 dark:text-gray-100"
+                    placeholder="admin"
+                    disabled={action.condition?.operator === 'exists' || action.condition?.operator === 'not_exists'}
+                  />
+                </div>
+                <div className="col-span-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+                    {t('script.action.conditionHint') || '示例：当 username = admin 时执行此操作'}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* 语义信息展示（编辑模式） */}
           {(action.intent || action.accessibility || action.context || action.evidence) && (
             <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
@@ -3482,8 +3613,8 @@ function SortableActionItem({ id, action, index, onUpdate, onDelete, onDuplicate
                     <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-xs">
                       <div
                         className={`h-2 rounded-full transition-all ${action.evidence.confidence >= 0.8 ? 'bg-green-500' :
-                            action.evidence.confidence >= 0.6 ? 'bg-yellow-500' :
-                              'bg-orange-500'
+                          action.evidence.confidence >= 0.6 ? 'bg-yellow-500' :
+                            'bg-orange-500'
                           }`}
                         style={{ width: `${action.evidence.confidence * 100}%` }}
                       />
@@ -3575,7 +3706,15 @@ function ActionItemView({ action, index }: ActionItemViewProps) {
             <span className="font-medium">{t('script.action.remark')}</span>{' '}
             <span className="text-gray-800 dark:text-gray-200">{action.remark}</span>
           </div>
-        )}        
+        )}
+        {action.condition && action.condition.enabled && (
+          <div className="text-sm text-gray-600 dark:text-gray-400">
+            <span className="font-medium">{t('script.action.condition') || '条件'}:</span>{' '}
+            <code className="bg-gray-100 dark:bg-gray-900 px-2 py-1 rounded text-sm">
+              {action.condition.variable} {action.condition.operator} {action.condition.operator !== 'exists' && action.condition.operator !== 'not_exists' ? action.condition.value : ''}
+            </code>
+          </div>
+        )}
         {action.url && (
           <div className="text-sm text-gray-600 dark:text-gray-400">
             <span className="font-medium">URL:</span>{' '}
@@ -3785,8 +3924,8 @@ function ActionItemView({ action, index }: ActionItemViewProps) {
                   <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 w-32">
                     <div
                       className={`h-2 rounded-full ${action.evidence.confidence >= 0.8 ? 'bg-green-500' :
-                          action.evidence.confidence >= 0.6 ? 'bg-yellow-500' :
-                            'bg-orange-500'
+                        action.evidence.confidence >= 0.6 ? 'bg-yellow-500' :
+                          'bg-orange-500'
                         }`}
                       style={{ width: `${action.evidence.confidence * 100}%` }}
                     />

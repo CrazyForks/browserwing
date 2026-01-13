@@ -628,6 +628,11 @@ func (h *Handler) PlayScript(c *gin.Context) {
 		for key, value := range scriptToRun.Variables {
 			mergedParams[key] = value
 		}
+		for key := range scriptToRun.Variables {
+			if _, ok := req.Params[key]; ok {
+				scriptToRun.Variables[key] = req.Params[key]
+			}
+		}
 	}
 
 	// 2. 外部传入的参数会覆盖预设变量
@@ -1024,7 +1029,7 @@ func (h *Handler) GenerateMCPConfig(c *gin.Context) {
 	}
 
 	// 构建提示词
-	actionsJSON, _ := fmt.Sprintf("%+v", script.Actions), ""
+	actionsJSON := fmt.Sprintf("Script Variables: %+v\nActions: %s", script.Variables, script.GetActionsWithoutSemanticInfoJSON())
 
 	// 调用 LLM
 	extractor, err := h.llmManager.GetDefault()

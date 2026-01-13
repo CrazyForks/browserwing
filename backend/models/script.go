@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -54,6 +55,8 @@ type ScriptAction struct {
 	ScrollX int `json:"scroll_x,omitempty"`
 	ScrollY int `json:"scroll_y,omitempty"`
 
+	Condition *ActionCondition `json:"condition,omitempty"`
+
 	// =========================
 	// 新增字段（v2，自愈核心）
 	// =========================
@@ -69,6 +72,46 @@ type ScriptAction struct {
 
 	// ④ 录制证据（debug / 自愈评分用）
 	Evidence *ActionEvidence `json:"evidence,omitempty"`
+}
+
+func (a *ScriptAction) CopyWithoutSemanticInfo() *ScriptAction {
+	return &ScriptAction{
+		Type:          a.Type,
+		Timestamp:     a.Timestamp,
+		Selector:      a.Selector,
+		XPath:         a.XPath,
+		Value:         a.Value,
+		URL:           a.URL,
+		Duration:      a.Duration,
+		X:             a.X,
+		Y:             a.Y,
+		Text:          a.Text,
+		TagName:       a.TagName,
+		Attrs:         a.Attrs,
+		Key:           a.Key,
+		ExtractType:   a.ExtractType,
+		AttributeName: a.AttributeName,
+		JSCode:        a.JSCode,
+		VariableName:  a.VariableName,
+		ExtractedData: a.ExtractedData,
+		FilePaths:     a.FilePaths,
+		FileNames:     a.FileNames,
+		Description:   a.Description,
+		Multiple:      a.Multiple,
+		Accept:        a.Accept,
+		Remark:        a.Remark,
+		ScrollX:       a.ScrollX,
+		ScrollY:       a.ScrollY,
+		Condition:     a.Condition,
+	}
+}
+
+// ActionCondition 操作执行条件
+type ActionCondition struct {
+	Variable string `json:"variable"`          // 变量名
+	Operator string `json:"operator"`          // 操作符: =, !=, >, <, >=, <=, in, not_in, exists, not_exists
+	Value    string `json:"value"`             // 比较值
+	Enabled  bool   `json:"enabled,omitempty"` // 是否启用条件（默认false）
 }
 
 type ActionIntent struct {
@@ -120,6 +163,22 @@ type Script struct {
 
 	// 预设变量（可以在脚本中使用 ${变量名} 引用，也可以在外部调用时传入覆盖）
 	Variables map[string]string `json:"variables,omitempty"` // 预设变量，key 为变量名，value 为默认值
+}
+
+func (s *Script) GetActionsWithoutSemanticInfo() []ScriptAction {
+	actions := make([]ScriptAction, len(s.Actions))
+	for i, action := range s.Actions {
+		actions[i] = *action.CopyWithoutSemanticInfo()
+	}
+	return actions
+}
+
+func (s *Script) GetActionsWithoutSemanticInfoJSON() string {
+	actionsJSON, err := json.Marshal(s.GetActionsWithoutSemanticInfo())
+	if err != nil {
+		return ""
+	}
+	return string(actionsJSON)
 }
 
 func (s *Script) Copy() *Script {
