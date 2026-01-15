@@ -8,10 +8,12 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/browserwing/browserwing/executor"
 	"github.com/browserwing/browserwing/models"
 	"github.com/browserwing/browserwing/pkg/logger"
 	"github.com/browserwing/browserwing/services/browser"
@@ -32,6 +34,10 @@ type MCPServer struct {
 	mcpServer            *server.MCPServer
 	streamableHTTPServer *server.StreamableHTTPServer
 	sseServer            *server.SSEServer
+
+	// Executor 实例，提供通用浏览器自动化能力
+	executor     *executor.Executor
+	toolRegistry *executor.MCPToolRegistry
 }
 
 // NewMCPServer 创建使用 mcp-go 的 MCP 服务器
@@ -68,6 +74,10 @@ func NewMCPServer(storage *storage.BoltDB, browserMgr *browser.Manager) *MCPServ
 		server.WithMessageEndpoint("/api/v1/mcp/sse_message"),
 	)
 
+	// 初始化 Executor 和工具注册表
+	s.executor = executor.NewExecutor(browserMgr)
+	s.toolRegistry = executor.NewMCPToolRegistry(s.executor, s.mcpServer)
+
 	return s
 }
 
@@ -99,6 +109,13 @@ func (s *MCPServer) Start() error {
 	if err := s.registerAllTools(); err != nil {
 		return fmt.Errorf("failed to register tools: %w", err)
 	}
+
+	// 注册 Executor 工具
+	if err := s.toolRegistry.RegisterAllTools(); err != nil {
+		return fmt.Errorf("failed to register executor tools: %w", err)
+	}
+	
+	logger.Info(s.ctx, "Registered %d executor tools", len(s.toolRegistry.GetToolMetadata()))
 
 	return nil
 }
@@ -363,6 +380,12 @@ func (s *MCPServer) GetStatus() map[string]interface{} {
 
 // CallTool 直接调用工具（用于 Agent）
 func (s *MCPServer) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (interface{}, error) {
+	// 检查是否是 Executor 工具（以 "browser_" 开头）
+	if strings.HasPrefix(name, "browser_") {
+		return s.callExecutorTool(ctx, name, arguments)
+	}
+
+	// 处理脚本工具
 	s.mu.RLock()
 	script, exists := s.scriptsByName[name]
 	s.mu.RUnlock()
@@ -448,4 +471,231 @@ func (s *MCPServer) ServeSteamableHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *MCPServer) GetSSEServer() *server.SSEServer {
 	return s.sseServer
+}
+
+// callExecutorTool 调用 Executor 工具
+func (s *MCPServer) callExecutorTool(ctx context.Context, name string, arguments map[string]interface{}) (interface{}, error) {
+	logger.Info(ctx, "CallTool: Executing Executor tool: %s, arguments %+v", name, arguments)
+
+	// 确保浏览器已启动
+	if !s.browserMgr.IsRunning() {
+		logger.Info(ctx, "Browser not running, starting...")
+		if err := s.browserMgr.Start(ctx); err != nil {
+			return nil, fmt.Errorf("failed to start browser: %w", err)
+		}
+	}
+
+	// 根据工具名调用相应的 Executor 方法
+	switch name {
+	case "browser_navigate":
+		url, _ := arguments["url"].(string)
+		waitUntil, _ := arguments["wait_until"].(string)
+		
+		opts := &executor.NavigateOptions{}
+		if waitUntil != "" {
+			opts.WaitUntil = waitUntil
+		}
+		
+		result, err := s.executor.Navigate(ctx, url, opts)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"success": result.Success,
+			"message": result.Message,
+		}, nil
+
+	case "browser_click":
+		identifier, _ := arguments["identifier"].(string)
+		waitVisible, _ := arguments["wait_visible"].(bool)
+		
+		opts := &executor.ClickOptions{
+			WaitVisible: waitVisible,
+		}
+		
+		result, err := s.executor.Click(ctx, identifier, opts)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"success": result.Success,
+			"message": result.Message,
+		}, nil
+
+	case "browser_type":
+		identifier, _ := arguments["identifier"].(string)
+		text, _ := arguments["text"].(string)
+		clear := true
+		if clearArg, ok := arguments["clear"].(bool); ok {
+			clear = clearArg
+		}
+		
+		opts := &executor.TypeOptions{
+			Clear: clear,
+		}
+		
+		result, err := s.executor.Type(ctx, identifier, text, opts)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"success": result.Success,
+			"message": result.Message,
+		}, nil
+
+	case "browser_select":
+		identifier, _ := arguments["identifier"].(string)
+		value, _ := arguments["value"].(string)
+		
+		result, err := s.executor.Select(ctx, identifier, value, nil)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"success": result.Success,
+			"message": result.Message,
+		}, nil
+
+	case "browser_screenshot":
+		fullPage, _ := arguments["full_page"].(bool)
+		format, _ := arguments["format"].(string)
+		if format == "" {
+			format = "png"
+		}
+		
+		opts := &executor.ScreenshotOptions{
+			FullPage: fullPage,
+			Format:   format,
+		}
+		
+		result, err := s.executor.Screenshot(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"success": result.Success,
+			"message": result.Message,
+			"size":    result.Data["size"],
+		}, nil
+
+	case "browser_extract":
+		selector, _ := arguments["selector"].(string)
+		extractType, _ := arguments["type"].(string)
+		if extractType == "" {
+			extractType = "text"
+		}
+		multiple, _ := arguments["multiple"].(bool)
+		
+		opts := &executor.ExtractOptions{
+			Selector: selector,
+			Type:     extractType,
+			Multiple: multiple,
+		}
+		
+		result, err := s.executor.Extract(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"success": result.Success,
+			"message": result.Message,
+			"data":    result.Data["result"],
+		}, nil
+
+	case "browser_get_semantic_tree":
+		simple := true
+		if simpleArg, ok := arguments["simple"].(bool); ok {
+			simple = simpleArg
+		}
+		
+		tree, err := s.executor.GetSemanticTree(ctx)
+		if err != nil {
+			return nil, err
+		}
+		
+		if simple {
+			return map[string]interface{}{
+				"success": true,
+				"message": "Successfully retrieved semantic tree",
+				"tree":    tree.SerializeToSimpleText(),
+			}, nil
+		}
+		
+		return map[string]interface{}{
+			"success": true,
+			"message": "Successfully retrieved semantic tree",
+			"tree":    tree,
+		}, nil
+
+	case "browser_get_page_info":
+		result, err := s.executor.GetPageInfo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"success": result.Success,
+			"message": result.Message,
+			"info":    result.Data,
+		}, nil
+
+	case "browser_wait_for":
+		identifier, _ := arguments["identifier"].(string)
+		state, _ := arguments["state"].(string)
+		if state == "" {
+			state = "visible"
+		}
+		
+		opts := &executor.WaitForOptions{
+			State: state,
+		}
+		
+		if timeout, ok := arguments["timeout"].(float64); ok {
+			opts.Timeout = time.Duration(timeout) * time.Second
+		}
+		
+		result, err := s.executor.WaitFor(ctx, identifier, opts)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"success": result.Success,
+			"message": result.Message,
+		}, nil
+
+	case "browser_scroll":
+		direction, _ := arguments["direction"].(string)
+		if direction == "" || direction == "bottom" {
+			result, err := s.executor.ScrollToBottom(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]interface{}{
+				"success": result.Success,
+				"message": result.Message,
+			}, nil
+		}
+		
+		// 滚动到顶部或元素
+		page := s.executor.GetRodPage()
+		if page != nil {
+			if direction == "top" {
+				_, err := page.Eval(`() => window.scrollTo(0, 0)`)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]interface{}{
+					"success": true,
+					"message": "Scrolled to top",
+				}, nil
+			}
+		}
+		
+		return map[string]interface{}{
+			"success": false,
+			"message": "Invalid scroll direction",
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unknown executor tool: %s", name)
+	}
 }

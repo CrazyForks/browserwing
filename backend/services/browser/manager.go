@@ -362,6 +362,13 @@ func (m *Manager) IsRunning() bool {
 	return m.isRunning
 }
 
+// GetActivePage 获取当前活动页面
+func (m *Manager) GetActivePage() *rod.Page {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.activePage
+}
+
 // CloseActivePage 关闭当前活动页面
 func (m *Manager) CloseActivePage(ctx context.Context, page *rod.Page) error {
 	m.mu.Lock()
@@ -467,9 +474,14 @@ func (m *Manager) setPageWindow(page *rod.Page) {
 }
 
 // OpenPage 打开一个新页面
-func (m *Manager) OpenPage(url string, language string) error {
+func (m *Manager) OpenPage(url string, language string, norecord ...bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	var noRecord bool
+	if len(norecord) > 0 {
+		noRecord = norecord[0]
+	}
 
 	if !m.isRunning || m.browser == nil {
 		return fmt.Errorf("browser is not running")
@@ -513,12 +525,12 @@ func (m *Manager) OpenPage(url string, language string) error {
 		UserAgent: userAgent,
 	})
 
-	// 导航到目标 URL
-	if err := page.Navigate(url); err != nil {
+	// 导航到目标 URL（设置60秒超时）
+	if err := page.Timeout(60 * time.Second).Navigate(url); err != nil {
 		return fmt.Errorf("failed to navigate to page: %w", err)
 	}
 
-	if err := page.WaitLoad(); err != nil {
+	if err := page.Timeout(60 * time.Second).WaitLoad(); err != nil {
 		return fmt.Errorf("failed to wait for page load: %w", err)
 	}
 
@@ -539,31 +551,32 @@ func (m *Manager) OpenPage(url string, language string) error {
 		}
 	}
 
-	// 注入浮动录制按钮
-	time.Sleep(500 * time.Millisecond) // 等待页面稳定
-	// 替换浮动按钮脚本中的多语言占位符
-	localizedFloatButtonScript := ReplaceI18nPlaceholders(floatButtonScript, m.currentLanguage, FloatButtonI18n)
-	_, err := page.Eval(`() => { ` + localizedFloatButtonScript + ` return true; }`)
-	if err != nil {
-		logger.Warn(ctx, "Failed to inject float button script: %v", err)
-	} else {
-		logger.Info(ctx, "✓ Float recording button injected successfully (language: %s)", m.currentLanguage)
+	if !noRecord {
+		// 注入浮动录制按钮
+		time.Sleep(500 * time.Millisecond) // 等待页面稳定
+		// 替换浮动按钮脚本中的多语言占位符
+		localizedFloatButtonScript := ReplaceI18nPlaceholders(floatButtonScript, m.currentLanguage, FloatButtonI18n)
+		_, err := page.Eval(`() => { ` + localizedFloatButtonScript + ` return true; }`)
+		if err != nil {
+			logger.Warn(ctx, "Failed to inject float button script: %v", err)
+		} else {
+			logger.Info(ctx, "✓ Float recording button injected successfully (language: %s)", m.currentLanguage)
 
-		// 设置 API 端口信息
-		if m.config.Server != nil && m.config.Server.Port != "" {
-			apiPort := m.config.Server.Port
-			setPortScript := fmt.Sprintf(`() => { window.__browserwingAPIPort__ = "%s"; }`, apiPort)
-			if _, err := page.Eval(setPortScript); err != nil {
-				logger.Warn(ctx, "Failed to set API port: %v", err)
+			// 设置 API 端口信息
+			if m.config.Server != nil && m.config.Server.Port != "" {
+				apiPort := m.config.Server.Port
+				setPortScript := fmt.Sprintf(`() => { window.__browserwingAPIPort__ = "%s"; }`, apiPort)
+				if _, err := page.Eval(setPortScript); err != nil {
+					logger.Warn(ctx, "Failed to set API port: %v", err)
+				}
 			}
 		}
+		// 启动轮询检查页面内的录制请求
+		go m.checkInPageRecordingRequests(ctx, page)
 	}
 
 	// 保存当前活动页面
 	m.activePage = page
-
-	// 启动轮询检查页面内的录制请求
-	go m.checkInPageRecordingRequests(ctx, page)
 
 	logger.Info(ctx, fmt.Sprintf("Page opened: %s", url))
 	return nil
