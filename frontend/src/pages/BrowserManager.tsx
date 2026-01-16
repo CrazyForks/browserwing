@@ -65,6 +65,7 @@ export default function BrowserManager() {
     name: '',
     description: '',
     url_pattern: '',
+    proxy: '',
     user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
     use_stealth: null as boolean | null,
     headless: null as boolean | null,
@@ -410,6 +411,7 @@ export default function BrowserManager() {
                   name: '',
                   description: '',
                   url_pattern: '',
+                  proxy: '',
                   user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
                   use_stealth: null,
                   headless: null,
@@ -844,6 +846,11 @@ export default function BrowserManager() {
                                 {config.url_pattern}
                               </span>
                             )}
+                            {config.proxy && (
+                              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full font-mono">
+                                {config.proxy}
+                              </span>
+                            )}
                           </div>
                           <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{config.description}</p>
                         </div>
@@ -855,6 +862,7 @@ export default function BrowserManager() {
                                 name: config.name,
                                 description: config.description,
                                 url_pattern: config.url_pattern,
+                                proxy: config.proxy,
                                 user_agent: config.user_agent,
                                 use_stealth: config.use_stealth,
                                 headless: config.headless,
@@ -927,6 +935,21 @@ export default function BrowserManager() {
                     className="input w-full font-mono text-sm"
                   />
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1" dangerouslySetInnerHTML={{ __html: t('browser.config.urlPatternHint') }} />
+                </div>
+
+                {/* 代理地址 */}
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    {t('browser.config.proxy')}
+                  </label>
+                  <input
+                    type="text"
+                    value={configForm.proxy}
+                    onChange={(e) => setConfigForm({ ...configForm, proxy: e.target.value })}
+                    placeholder={t('browser.config.proxyPlaceholder')}
+                    className="input w-full"
+                  />
                 </div>
 
                 {/* User Agent */}

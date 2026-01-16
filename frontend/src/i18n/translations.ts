@@ -762,6 +762,8 @@ export const translations = {
     'browser.config.deleteSuccess': '配置删除成功',
     'browser.config.deleteError': '删除失败',
     'browser.config.nameRequired': '请输入配置名称',
+    'browser.config.proxy': '代理地址',
+    'browser.config.proxyPlaceholder': '例如: http://127.0.0.1:7890',
     'browser.messages.recordingStopped': '录制已停止',
 
     // Cookie 管理
@@ -1602,6 +1604,8 @@ export const translations = {
     'browser.config.deleteSuccess': '配置刪除成功',
     'browser.config.deleteError': '刪除失敗',
     'browser.config.nameRequired': '請輸入配置名稱',
+    'browser.config.proxy': '代理地址',
+    'browser.config.proxyPlaceholder': '例如: http://127.0.0.1:7890',
     'browser.messages.recordingStopped': '錄製已停止',
 
     // MCP Service
@@ -2536,6 +2540,8 @@ export const translations = {
     'browser.config.deleteSuccess': 'Configuration deleted successfully',
     'browser.config.deleteError': 'Failed to delete',
     'browser.config.nameRequired': 'Please enter configuration name',
+    'browser.config.proxy': 'Proxy Address',
+    'browser.config.proxyPlaceholder': 'e.g.: http://127.0.0.1:7890',
     'browser.messages.recordingStopped': 'Recording stopped as browser is not running',
 
     // Cookie Management
@@ -3416,6 +3422,8 @@ export const translations = {
     'browser.config.deleteSuccess': 'Configuración eliminada exitosamente',
     'browser.config.deleteError': 'Error al eliminar',
     'browser.config.nameRequired': 'Por favor ingrese el nombre de configuración',
+    'browser.config.proxy': 'Dirección de Proxy (HTTP/HTTPS)',
+    'browser.config.proxyPlaceholder': 'ej.: http://127.0.0.1:7890',
     'browser.messages.recordingStopped': 'La grabación se detuvo automáticamente debido a la detención del navegador',
 
     // Gestión de Prompts
@@ -4299,6 +4307,8 @@ export const translations = {
     'browser.config.deleteSuccess': '設定が正常に削除されました',
     'browser.config.deleteError': '削除に失敗しました',
     'browser.config.nameRequired': '設定名を入力してください',
+    'browser.config.proxy': 'プロキシアドレス',
+    'browser.config.proxyPlaceholder': '例: http://127.0.0.1:7890',
     'browser.messages.recordingStopped': '録画が手動で停止されました',
 
     // プロンプト管理

@@ -119,6 +119,11 @@ func (m *Manager) Start(ctx context.Context) error {
 		Devtools(false).
 		Leakless(false)
 
+	if defaultConfig.Proxy != "" {
+		l = l.Proxy(defaultConfig.Proxy)
+		logger.Info(ctx, fmt.Sprintf("Using proxy: %s", defaultConfig.Proxy))
+	}
+
 	// 打印启动参数
 	logger.Info(ctx, fmt.Sprintf("Number of launch arguments: %d", len(defaultConfig.LaunchArgs)))
 	for i, arg := range defaultConfig.LaunchArgs {

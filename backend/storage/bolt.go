@@ -974,25 +974,25 @@ func (b *BoltDB) SaveMCPService(service *models.MCPService) error {
 	}
 
 	return b.db.Update(func(tx *bolt.Tx) error {
-bucket := tx.Bucket(mcpServicesBucket)
-data, err := json.Marshal(service)
-if err != nil {
-return err
-}
-return bucket.Put([]byte(service.ID), data)
-})
+		bucket := tx.Bucket(mcpServicesBucket)
+		data, err := json.Marshal(service)
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(service.ID), data)
+	})
 }
 
 // GetMCPService 获取MCP服务配置
 func (b *BoltDB) GetMCPService(id string) (*models.MCPService, error) {
 	var service models.MCPService
 	err := b.db.View(func(tx *bolt.Tx) error {
-bucket := tx.Bucket(mcpServicesBucket)
-data := bucket.Get([]byte(id))
-if data == nil {
-return fmt.Errorf("mcp service not found: %s", id)
-}
-return json.Unmarshal(data, &service)
+		bucket := tx.Bucket(mcpServicesBucket)
+		data := bucket.Get([]byte(id))
+		if data == nil {
+			return fmt.Errorf("mcp service not found: %s", id)
+		}
+		return json.Unmarshal(data, &service)
 	})
 	if err != nil {
 		return nil, err
@@ -1004,10 +1004,10 @@ return json.Unmarshal(data, &service)
 func (b *BoltDB) ListMCPServices() ([]*models.MCPService, error) {
 	var services []*models.MCPService
 	err := b.db.View(func(tx *bolt.Tx) error {
-bucket := tx.Bucket(mcpServicesBucket)
-return bucket.ForEach(func(k, v []byte) error {
-var service models.MCPService
-if err := json.Unmarshal(v, &service); err != nil {
+		bucket := tx.Bucket(mcpServicesBucket)
+		return bucket.ForEach(func(k, v []byte) error {
+			var service models.MCPService
+			if err := json.Unmarshal(v, &service); err != nil {
 				return nil // 跳过无效数据
 			}
 			services = append(services, &service)
@@ -1020,7 +1020,7 @@ if err := json.Unmarshal(v, &service); err != nil {
 
 	// 按名称排序
 	sort.Slice(services, func(i, j int) bool {
-return services[i].Name < services[j].Name
+		return services[i].Name < services[j].Name
 	})
 
 	return services, nil
@@ -1029,48 +1029,48 @@ return services[i].Name < services[j].Name
 // DeleteMCPService 删除MCP服务配置
 func (b *BoltDB) DeleteMCPService(id string) error {
 	return b.db.Update(func(tx *bolt.Tx) error {
-bucket := tx.Bucket(mcpServicesBucket)
-return bucket.Delete([]byte(id))
-})
+		bucket := tx.Bucket(mcpServicesBucket)
+		return bucket.Delete([]byte(id))
+	})
 }
 
 // SaveMCPServiceTools 保存MCP服务发现的工具列表
 func (b *BoltDB) SaveMCPServiceTools(serviceID string, tools []models.MCPDiscoveredTool) error {
 	return b.db.Update(func(tx *bolt.Tx) error {
-bucket := tx.Bucket(mcpServicesBucket)
+		bucket := tx.Bucket(mcpServicesBucket)
 
-// 先获取现有服务
-data := bucket.Get([]byte(serviceID))
-if data == nil {
-return fmt.Errorf("mcp service not found: %s", serviceID)
-}
+		// 先获取现有服务
+		data := bucket.Get([]byte(serviceID))
+		if data == nil {
+			return fmt.Errorf("mcp service not found: %s", serviceID)
+		}
 
-var service models.MCPService
-if err := json.Unmarshal(data, &service); err != nil {
+		var service models.MCPService
+		if err := json.Unmarshal(data, &service); err != nil {
 			return err
 		}
-		
+
 		// 更新工具数量和状态
 		service.ToolCount = len(tools)
 		service.UpdatedAt = time.Now()
-		
+
 		// 保存服务
 		newData, err := json.Marshal(&service)
 		if err != nil {
 			return err
 		}
-		
+
 		// 保存工具列表到单独的key
 		toolsKey := []byte(serviceID + "_tools")
 		toolsData, err := json.Marshal(tools)
 		if err != nil {
 			return err
 		}
-		
+
 		if err := bucket.Put(toolsKey, toolsData); err != nil {
 			return err
 		}
-		
+
 		return bucket.Put([]byte(serviceID), newData)
 	})
 }
@@ -1079,14 +1079,14 @@ if err := json.Unmarshal(data, &service); err != nil {
 func (b *BoltDB) GetMCPServiceTools(serviceID string) ([]models.MCPDiscoveredTool, error) {
 	var tools []models.MCPDiscoveredTool
 	err := b.db.View(func(tx *bolt.Tx) error {
-bucket := tx.Bucket(mcpServicesBucket)
-toolsKey := []byte(serviceID + "_tools")
-data := bucket.Get(toolsKey)
-if data == nil {
-// 如果没有找到工具数据,返回空列表而不是错误
-return nil
-}
-return json.Unmarshal(data, &tools)
+		bucket := tx.Bucket(mcpServicesBucket)
+		toolsKey := []byte(serviceID + "_tools")
+		data := bucket.Get(toolsKey)
+		if data == nil {
+			// 如果没有找到工具数据,返回空列表而不是错误
+			return nil
+		}
+		return json.Unmarshal(data, &tools)
 	})
 	if err != nil {
 		return nil, err

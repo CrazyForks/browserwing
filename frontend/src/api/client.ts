@@ -114,6 +114,7 @@ export interface BrowserConfig {
   name: string
   description: string
   url_pattern: string  // URL正则匹配模式
+  proxy: string        // 代理地址，为空使用默认
   user_agent: string
   use_stealth: boolean | null  // null表示使用默认值
   headless: boolean | null     // null表示使用默认值(false)
