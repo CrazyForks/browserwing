@@ -24,6 +24,8 @@ var (
 	agentMessagesBucket    = []byte("agent_messages")
 	toolConfigsBucket      = []byte("tool_configs")
 	mcpServicesBucket      = []byte("mcp_services")
+	usersBucket            = []byte("users")
+	apiKeysBucket          = []byte("api_keys")
 )
 
 type BoltDB struct {
@@ -84,6 +86,14 @@ func NewBoltDB(dbPath string) (*BoltDB, error) {
 			return err
 		}
 		_, err = tx.CreateBucketIfNotExists(mcpServicesBucket)
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists(usersBucket)
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists(apiKeysBucket)
 		return err
 	})
 	if err != nil {
@@ -1092,4 +1102,234 @@ func (b *BoltDB) GetMCPServiceTools(serviceID string) ([]models.MCPDiscoveredToo
 		return nil, err
 	}
 	return tools, nil
+}
+
+// ============= 用户管理 =============
+
+// CreateUser 创建用户
+func (b *BoltDB) CreateUser(user *models.User) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(usersBucket)
+		data, err := json.Marshal(user)
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(user.ID), data)
+	})
+}
+
+// GetUser 获取用户
+func (b *BoltDB) GetUser(id string) (*models.User, error) {
+	var user models.User
+	err := b.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(usersBucket)
+		data := bucket.Get([]byte(id))
+		if data == nil {
+			return fmt.Errorf("user not found")
+		}
+		return json.Unmarshal(data, &user)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// GetUserByUsername 根据用户名获取用户
+func (b *BoltDB) GetUserByUsername(username string) (*models.User, error) {
+	var user *models.User
+	err := b.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(usersBucket)
+		c := bucket.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var u models.User
+			if err := json.Unmarshal(v, &u); err != nil {
+				continue
+			}
+			if u.Username == username {
+				user = &u
+				return nil
+			}
+		}
+		return fmt.Errorf("user not found")
+	})
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// ListUsers 列出所有用户
+func (b *BoltDB) ListUsers() ([]*models.User, error) {
+	var users []*models.User
+	err := b.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(usersBucket)
+		return bucket.ForEach(func(k, v []byte) error {
+			var user models.User
+			if err := json.Unmarshal(v, &user); err != nil {
+				return err
+			}
+			users = append(users, &user)
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// 按创建时间排序
+	sort.Slice(users, func(i, j int) bool {
+		return users[i].CreatedAt.After(users[j].CreatedAt)
+	})
+
+	return users, nil
+}
+
+// UpdateUser 更新用户
+func (b *BoltDB) UpdateUser(user *models.User) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(usersBucket)
+		data, err := json.Marshal(user)
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(user.ID), data)
+	})
+}
+
+// DeleteUser 删除用户
+func (b *BoltDB) DeleteUser(id string) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(usersBucket)
+		return bucket.Delete([]byte(id))
+	})
+}
+
+// ============= ApiKey 管理 =============
+
+// CreateApiKey 创建API密钥
+func (b *BoltDB) CreateApiKey(apiKey *models.ApiKey) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(apiKeysBucket)
+		data, err := json.Marshal(apiKey)
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(apiKey.ID), data)
+	})
+}
+
+// GetApiKey 获取API密钥
+func (b *BoltDB) GetApiKey(id string) (*models.ApiKey, error) {
+	var apiKey models.ApiKey
+	err := b.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(apiKeysBucket)
+		data := bucket.Get([]byte(id))
+		if data == nil {
+			return fmt.Errorf("api key not found")
+		}
+		return json.Unmarshal(data, &apiKey)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &apiKey, nil
+}
+
+// GetApiKeyByKey 根据密钥获取API密钥
+func (b *BoltDB) GetApiKeyByKey(key string) (*models.ApiKey, error) {
+	var apiKey *models.ApiKey
+	err := b.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(apiKeysBucket)
+		c := bucket.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var ak models.ApiKey
+			if err := json.Unmarshal(v, &ak); err != nil {
+				continue
+			}
+			if ak.Key == key {
+				apiKey = &ak
+				return nil
+			}
+		}
+		return fmt.Errorf("api key not found")
+	})
+	if err != nil {
+		return nil, err
+	}
+	return apiKey, nil
+}
+
+// ListApiKeys 列出所有API密钥
+func (b *BoltDB) ListApiKeys() ([]*models.ApiKey, error) {
+	var apiKeys []*models.ApiKey
+	err := b.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(apiKeysBucket)
+		return bucket.ForEach(func(k, v []byte) error {
+			var apiKey models.ApiKey
+			if err := json.Unmarshal(v, &apiKey); err != nil {
+				return err
+			}
+			apiKeys = append(apiKeys, &apiKey)
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// 按创建时间排序
+	sort.Slice(apiKeys, func(i, j int) bool {
+		return apiKeys[i].CreatedAt.After(apiKeys[j].CreatedAt)
+	})
+
+	return apiKeys, nil
+}
+
+// ListApiKeysByUser 列出用户的所有API密钥
+func (b *BoltDB) ListApiKeysByUser(userID string) ([]*models.ApiKey, error) {
+	var apiKeys []*models.ApiKey
+	err := b.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(apiKeysBucket)
+		return bucket.ForEach(func(k, v []byte) error {
+			var apiKey models.ApiKey
+			if err := json.Unmarshal(v, &apiKey); err != nil {
+				return err
+			}
+			if apiKey.UserID == userID {
+				apiKeys = append(apiKeys, &apiKey)
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// 按创建时间排序
+	sort.Slice(apiKeys, func(i, j int) bool {
+		return apiKeys[i].CreatedAt.After(apiKeys[j].CreatedAt)
+	})
+
+	return apiKeys, nil
+}
+
+// UpdateApiKey 更新API密钥
+func (b *BoltDB) UpdateApiKey(apiKey *models.ApiKey) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(apiKeysBucket)
+		data, err := json.Marshal(apiKey)
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(apiKey.ID), data)
+	})
+}
+
+// DeleteApiKey 删除API密钥
+func (b *BoltDB) DeleteApiKey(id string) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(apiKeysBucket)
+		return bucket.Delete([]byte(id))
+	})
 }

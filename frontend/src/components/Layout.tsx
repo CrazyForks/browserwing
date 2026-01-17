@@ -1,19 +1,25 @@
-import { Outlet, Link, useLocation } from 'react-router-dom'
-import { Chrome, FileCode, Brain, Languages, MessageSquare, Sun, Moon } from 'lucide-react'
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
+import { Chrome, FileCode, Brain, Languages, MessageSquare, Sun, Moon, Settings, LogOut } from 'lucide-react'
 import { useLanguage, LANGUAGES } from '../i18n'
 import { useState, useRef, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import { CURRENT_VERSION, fetchLatestVersion, hasNewVersion, isVersionDismissed, dismissVersion, VersionInfo } from '../utils/version'
 import VersionUpdateDialog from './VersionUpdateDialog'
+import { logout, checkAuth } from '../api/client'
 
 export default function Layout() {
   const location = useLocation()
+  const navigate = useNavigate()
   const { t, language, setLanguage } = useLanguage()
   const { theme, toggleTheme } = useTheme()
   const [showLangMenu, setShowLangMenu] = useState(false)
+  const [showUserMenu, setShowUserMenu] = useState(false)
   const [showUpdateDialog, setShowUpdateDialog] = useState(false)
   const [latestVersionInfo, setLatestVersionInfo] = useState<VersionInfo | null>(null)
+  const [authEnabled, setAuthEnabled] = useState(false)
+  const [username, setUsername] = useState<string>('')
   const langMenuRef = useRef<HTMLDivElement>(null)
+  const userMenuRef = useRef<HTMLDivElement>(null)
 
   const isActive = (path: string) => {
     return location.pathname === path
@@ -26,11 +32,34 @@ export default function Layout() {
     { path: '/llm', labelKey: 'nav.llm', icon: Brain },
   ]
 
-  // 点击外部关闭语言菜单
+  // 检查是否启用认证并获取用户信息
+  useEffect(() => {
+    const checkAuthStatus = async () => {
+      const enabled = await checkAuth()
+      setAuthEnabled(enabled)
+      if (enabled) {
+        const userStr = localStorage.getItem('user')
+        if (userStr) {
+          try {
+            const user = JSON.parse(userStr)
+            setUsername(user.username || '')
+          } catch (e) {
+            console.error('Failed to parse user info:', e)
+          }
+        }
+      }
+    }
+    checkAuthStatus()
+  }, [])
+
+  // 点击外部关闭菜单
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (langMenuRef.current && !langMenuRef.current.contains(event.target as Node)) {
         setShowLangMenu(false)
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setShowUserMenu(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -166,6 +195,47 @@ export default function Layout() {
                   </div>
                 )}
               </div>
+
+              {/* 用户菜单（仅在启用认证时显示） */}
+              {authEnabled && (
+                <div className="relative ml-2" ref={userMenuRef}>
+                  <button
+                    onClick={() => setShowUserMenu(!showUserMenu)}
+                    className="flex items-center space-x-1.5 px-3 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100 transition-all duration-150"
+                    title={t('settings.title')}
+                  >
+                    <span className="text-sm font-medium">{username}</span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+
+                  {showUserMenu && (
+                    <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50">
+                      <button
+                        onClick={() => {
+                          navigate('/settings')
+                          setShowUserMenu(false)
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center space-x-2"
+                      >
+                        <Settings className="w-4 h-4" />
+                        <span>{t('settings.title')}</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          logout()
+                          setShowUserMenu(false)
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center space-x-2"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        <span>{t('auth.logout')}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </nav>
           </div>
         </div>

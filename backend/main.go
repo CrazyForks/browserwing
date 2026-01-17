@@ -18,9 +18,11 @@ import (
 	"github.com/browserwing/browserwing/config"
 	"github.com/browserwing/browserwing/llm"
 	"github.com/browserwing/browserwing/mcp"
+	"github.com/browserwing/browserwing/models"
 	"github.com/browserwing/browserwing/pkg/logger"
 	"github.com/browserwing/browserwing/services/browser"
 	"github.com/browserwing/browserwing/storage"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
@@ -90,6 +92,16 @@ func main() {
 	defer db.Close()
 
 	log.Println("✓ Database initialization successful")
+
+	// 初始化默认用户（如果启用了认证）
+	if cfg.Auth.Enabled {
+		err = initDefaultUser(db, cfg)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize default user: %v", err)
+		} else {
+			log.Println("✓ Default user initialized successfully")
+		}
+	}
 
 	// 初始化 LLM 管理器
 	llmManager := llm.NewManager(db)
@@ -257,4 +269,45 @@ func openBrowser(url string) {
 	}
 
 	_ = cmd.Start() // 不阻塞，忽略错误（有些环境可能没有 GUI）
+}
+
+// initDefaultUser 初始化默认用户
+func initDefaultUser(db *storage.BoltDB, cfg *config.Config) error {
+	// 检查是否已存在用户
+	users, err := db.ListUsers()
+	if err != nil {
+		log.Printf("Warning: Failed to list users: %v", err)
+		return err
+	}
+	
+	log.Printf("Current user count: %d", len(users))
+	
+	// 如果已有用户，显示现有用户信息（不显示密码）
+	if len(users) > 0 {
+		log.Printf("Existing users:")
+		for _, u := range users {
+			log.Printf("  - Username: %s, ID: %s", u.Username, u.ID)
+		}
+		log.Printf("Default user already exists, skipping creation")
+		return nil
+	}
+	
+	// 创建默认用户
+	log.Printf("Creating default user: username=%s, password=%s", cfg.Auth.DefaultUsername, cfg.Auth.DefaultPassword)
+	defaultUser := &models.User{
+		ID:        uuid.New().String(),
+		Username:  cfg.Auth.DefaultUsername,
+		Password:  cfg.Auth.DefaultPassword,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	
+	err = db.CreateUser(defaultUser)
+	if err != nil {
+		log.Printf("Error: Failed to create default user: %v", err)
+		return err
+	}
+	
+	log.Printf("✓ Created default user: username=%s, id=%s", defaultUser.Username, defaultUser.ID)
+	return nil
 }

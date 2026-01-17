@@ -2416,3 +2416,275 @@ func (h *Handler) discoverMCPTools(ctx context.Context, service *models.MCPServi
 	logger.Info(ctx, "Discovered %d tools from MCP service: %s", len(discoveredTools), service.Name)
 	return discoveredTools, nil
 }
+
+// ============= 认证相关 API =============
+
+// CheckAuth 检查是否需要认证
+func (h *Handler) CheckAuth(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"enabled": h.config.Auth.Enabled,
+	})
+}
+
+// Login 用户登录
+func (h *Handler) Login(c *gin.Context) {
+	var req models.LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidRequest"})
+		return
+	}
+
+	// 获取用户
+	user, err := h.db.GetUserByUsername(req.Username)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "error.invalidCredentials"})
+		return
+	}
+
+	// 验证密码
+	if user.Password != req.Password {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "error.invalidCredentials"})
+		return
+	}
+
+	// 生成JWT Token
+	token, err := GenerateJWT(user.ID, user.Username, h.config)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.generateTokenFailed"})
+		return
+	}
+
+	// 清空密码字段，不返回给前端
+	user.Password = ""
+
+	c.JSON(http.StatusOK, models.LoginResponse{
+		Token: token,
+		User:  user,
+	})
+}
+
+// ============= 用户管理 API =============
+
+// ListUsers 列出所有用户
+func (h *Handler) ListUsers(c *gin.Context) {
+	users, err := h.db.ListUsers()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.listUsersFailed"})
+		return
+	}
+
+	// 清空所有用户的密码字段
+	for _, user := range users {
+		user.Password = ""
+	}
+
+	c.JSON(http.StatusOK, users)
+}
+
+// GetUser 获取用户信息
+func (h *Handler) GetUser(c *gin.Context) {
+	id := c.Param("id")
+
+	user, err := h.db.GetUser(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "error.userNotFound"})
+		return
+	}
+
+	// 清空密码字段
+	user.Password = ""
+
+	c.JSON(http.StatusOK, user)
+}
+
+// CreateUser 创建用户
+func (h *Handler) CreateUser(c *gin.Context) {
+	var req models.CreateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidRequest"})
+		return
+	}
+
+	// 检查用户名是否已存在
+	_, err := h.db.GetUserByUsername(req.Username)
+	if err == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.usernameExists"})
+		return
+	}
+
+	// 创建用户
+	user := &models.User{
+		ID:        uuid.New().String(),
+		Username:  req.Username,
+		Password:  req.Password, // 实际应该加密
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	if err := h.db.CreateUser(user); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.createUserFailed"})
+		return
+	}
+
+	// 清空密码字段，不返回给前端
+	user.Password = ""
+
+	c.JSON(http.StatusOK, user)
+}
+
+// UpdatePassword 更新密码
+func (h *Handler) UpdatePassword(c *gin.Context) {
+	id := c.Param("id")
+
+	var req models.UpdatePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidRequest"})
+		return
+	}
+
+	// 获取用户
+	user, err := h.db.GetUser(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "error.userNotFound"})
+		return
+	}
+
+	// 验证旧密码
+	if user.Password != req.OldPassword {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidOldPassword"})
+		return
+	}
+
+	// 更新密码
+	user.Password = req.NewPassword
+	user.UpdatedAt = time.Now()
+
+	if err := h.db.UpdateUser(user); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.updatePasswordFailed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "success.passwordUpdated"})
+}
+
+// DeleteUser 删除用户
+func (h *Handler) DeleteUser(c *gin.Context) {
+	id := c.Param("id")
+
+	// 删除用户的所有API密钥
+	apiKeys, err := h.db.ListApiKeysByUser(id)
+	if err == nil {
+		for _, key := range apiKeys {
+			h.db.DeleteApiKey(key.ID)
+		}
+	}
+
+	if err := h.db.DeleteUser(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.deleteUserFailed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "success.userDeleted"})
+}
+
+// ============= ApiKey 管理 API =============
+
+// ListApiKeys 列出API密钥
+func (h *Handler) ListApiKeys(c *gin.Context) {
+	// 获取当前用户ID
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "error.unauthorized"})
+		return
+	}
+
+	apiKeys, err := h.db.ListApiKeysByUser(userID.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.listApiKeysFailed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, apiKeys)
+}
+
+// GetApiKey 获取API密钥
+func (h *Handler) GetApiKey(c *gin.Context) {
+	id := c.Param("id")
+
+	apiKey, err := h.db.GetApiKey(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "error.apiKeyNotFound"})
+		return
+	}
+
+	// 验证是否是当前用户的API密钥
+	userID, _ := c.Get("user_id")
+	if apiKey.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "error.forbidden"})
+		return
+	}
+
+	c.JSON(http.StatusOK, apiKey)
+}
+
+// CreateApiKey 创建API密钥
+func (h *Handler) CreateApiKey(c *gin.Context) {
+	var req models.CreateApiKeyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidRequest"})
+		return
+	}
+
+	// 获取当前用户ID
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "error.unauthorized"})
+		return
+	}
+
+	// 生成随机API密钥
+	apiKeyValue := "bw_" + uuid.New().String()
+
+	apiKey := &models.ApiKey{
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		Key:         apiKeyValue,
+		Description: req.Description,
+		UserID:      userID.(string),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	if err := h.db.CreateApiKey(apiKey); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.createApiKeyFailed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, apiKey)
+}
+
+// DeleteApiKey 删除API密钥
+func (h *Handler) DeleteApiKey(c *gin.Context) {
+	id := c.Param("id")
+
+	// 获取API密钥
+	apiKey, err := h.db.GetApiKey(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "error.apiKeyNotFound"})
+		return
+	}
+
+	// 验证是否是当前用户的API密钥
+	userID, _ := c.Get("user_id")
+	if apiKey.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "error.forbidden"})
+		return
+	}
+
+	if err := h.db.DeleteApiKey(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.deleteApiKeyFailed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "success.apiKeyDeleted"})
+}

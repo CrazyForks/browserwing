@@ -16,6 +16,7 @@ type Config struct {
 	Browser   *BrowserConfig       `json:"browser" yaml:"browser" toml:"browser"`
 	AssetsDir string               `json:"assets_dir,omitempty" yaml:"assets_dir,omitempty" toml:"assets_dir,omitempty"`
 	Log       *logger.LoggerConfig `json:"log,omitempty" yaml:"log,omitempty" toml:"log,omitempty"`
+	Auth      *AuthConfig          `json:"auth,omitempty" yaml:"auth,omitempty" toml:"auth,omitempty"`
 }
 
 type ServerConfig struct {
@@ -96,6 +97,12 @@ func Load(path string) (*Config, error) {
 				Level: "info",
 				File:  "./log/browserwing.log",
 			},
+			Auth: &AuthConfig{
+				Enabled:         false,
+				AppKey:          "default-secret-key-change-in-production",
+				DefaultUsername: "admin",
+				DefaultPassword: "admin123",
+			},
 		}
 		// 如果错误是文件不存在，则将defConfig写到本地的path位置
 		if os.IsNotExist(err) {
@@ -124,6 +131,14 @@ func Load(path string) (*Config, error) {
 			MaxBackups: 3,
 			MaxAge:     7,
 			Compress:   false,
+		}
+	}
+	if cfg.Auth == nil {
+		cfg.Auth = &AuthConfig{
+			Enabled:         false,
+			AppKey:          "default-secret-key-change-in-production",
+			DefaultUsername: "admin",
+			DefaultPassword: "admin123",
 		}
 	}
 
@@ -175,4 +190,12 @@ func (c *Config) ListLLMs() []LLMConfig {
 		return []LLMConfig{*c.LLM}
 	}
 	return []LLMConfig{}
+}
+
+type AuthConfig struct {
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// 用于生成JWT Token的密钥
+	AppKey          string `json:"app_key" toml:"app_key"`
+	DefaultUsername string `json:"default_username" toml:"default_username"`
+	DefaultPassword string `json:"default_password" toml:"default_password"`
 }

@@ -5,9 +5,13 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/browserwing/browserwing/config"
+	"github.com/browserwing/browserwing/storage"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, embedMode, isDebug bool) *gin.Engine {
@@ -40,8 +44,16 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 
 	r.Static("/files/recordings", "./recordings")
 
-	// API路由组
+	// 认证相关API（不需要认证）
+	auth := r.Group("/api/v1/auth")
+	{
+		auth.POST("/login", handler.Login)
+		auth.GET("/check", handler.CheckAuth) // 检查是否需要认证
+	}
+
+	// API路由组（需要JWT认证）
 	api := r.Group("/api/v1")
+	api.Use(JWTAuthenticationMiddleware(handler.config, handler.db))
 	{
 		// 提示词相关
 		prompts := api.Group("/prompts")
@@ -68,8 +80,8 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 			browserAPI.POST("/record/stop", handler.StopRecording)
 			browserAPI.GET("/record/status", handler.GetRecordingStatus)
 			browserAPI.POST("/record/clear-state", handler.ClearInPageRecordingState)
-		} 
-		
+		}
+
 		// Cookie 管理
 		api.GET("/cookies/:id", handler.GetCookies)
 
@@ -91,7 +103,6 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 			scripts.POST("", handler.SaveScript)
 			scripts.PUT("/:id", handler.UpdateScript)
 			scripts.DELETE("/:id", handler.DeleteScript)
-			scripts.POST("/:id/play", handler.PlayScript)
 			scripts.GET("/play/result", handler.GetPlayResult) // 获取回放抓取的数据
 
 			// MCP 命令相关
@@ -104,6 +115,13 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 			scripts.POST("/batch/delete", handler.BatchDeleteScripts) // 批量删除
 		}
 
+		// PlayScript接口使用JWT或ApiKey认证（支持内部和外部调用）
+		scriptsPlay := r.Group("/api/v1/scripts")
+		scriptsPlay.Use(JWTOrApiKeyAuthenticationMiddleware(handler.config, handler.db))
+		{
+			scriptsPlay.POST("/:id/play", handler.PlayScript)
+		}
+
 		// 脚本执行记录相关
 		executions := api.Group("/script-executions")
 		{
@@ -113,15 +131,20 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 			executions.POST("/batch/delete", handler.BatchDeleteScriptExecutions) // 批量删除
 		}
 
-		// MCP 服务相关
+		// MCP 服务相关（管理接口）
 		mcp := api.Group("/mcp")
 		{
 			mcp.GET("/status", handler.GetMCPStatus)             // 获取 MCP 服务状态
 			mcp.GET("/commands", handler.ListMCPCommands)        // 列出所有 MCP 命令
 			mcp.GET("/commands_all", handler.ListMCPCommandsAll) // 列出所有 MCP 命令
+		}
 
-			mcp.Any("/sse", gin.WrapH(handler.mcpServer.GetSSEServer().SSEHandler()))
-			mcp.Any("/sse_message", gin.WrapH(handler.mcpServer.GetSSEServer().MessageHandler()))
+		// MCP SSE端点（使用ApiKey认证，供外部MCP客户端调用）
+		mcpSSE := r.Group("/api/v1/mcp")
+		mcpSSE.Use(ApiKeyAuthenticationMiddleware(handler.config, handler.db))
+		{
+			mcpSSE.Any("/sse", gin.WrapH(handler.mcpServer.GetSSEServer().SSEHandler()))
+			mcpSSE.Any("/sse_message", gin.WrapH(handler.mcpServer.GetSSEServer().MessageHandler()))
 		}
 
 		// LLM 配置管理
@@ -162,6 +185,25 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 			mcpServices.PUT("/:id/tools/:toolName", handler.UpdateMCPServiceToolEnabled) // 更新工具启用状态
 		}
 
+		// 用户管理
+		users := api.Group("/users")
+		{
+			users.GET("", handler.ListUsers)                   // 列出所有用户
+			users.GET("/:id", handler.GetUser)                 // 获取用户信息
+			users.POST("", handler.CreateUser)                 // 创建用户
+			users.PUT("/:id/password", handler.UpdatePassword) // 更新密码
+			users.DELETE("/:id", handler.DeleteUser)           // 删除用户
+		}
+
+		// ApiKey管理
+		apiKeys := api.Group("/api-keys")
+		{
+			apiKeys.GET("", handler.ListApiKeys)         // 列出所有API密钥
+			apiKeys.GET("/:id", handler.GetApiKey)       // 获取API密钥
+			apiKeys.POST("", handler.CreateApiKey)       // 创建API密钥
+			apiKeys.DELETE("/:id", handler.DeleteApiKey) // 删除API密钥
+		}
+
 		// Agent 聊天相关
 		if agentHandler != nil {
 			type AgentHandlerInterface interface {
@@ -200,8 +242,21 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 				path = "index.html"
 			}
 
-			// 如果是以 mcp 开头的
+			// 如果是以 mcp 开头的，需要ApiKey认证
 			if strings.HasPrefix(path, "api/v1/mcp/message") {
+				// 验证ApiKey
+				if handler.config.Auth.Enabled {
+					apiKey := c.GetHeader("X-BrowserWing-Key")
+					if apiKey == "" {
+						c.JSON(http.StatusUnauthorized, gin.H{"error": "error.unauthorized"})
+						return
+					}
+					_, err := handler.db.GetApiKeyByKey(apiKey)
+					if err != nil {
+						c.JSON(http.StatusUnauthorized, gin.H{"error": "error.invalidApiKey"})
+						return
+					}
+				}
 				handler.mcpServer.ServeSteamableHTTP(c.Writer, c.Request)
 				return
 			}
@@ -247,6 +302,19 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 	} else {
 		r.NoRoute(func(c *gin.Context) {
 			if strings.HasPrefix(c.Request.URL.Path, "/api/v1/mcp/message") {
+				// 验证ApiKey
+				if handler.config.Auth.Enabled {
+					apiKey := c.GetHeader("X-BrowserWing-Key")
+					if apiKey == "" {
+						c.JSON(http.StatusUnauthorized, gin.H{"error": "error.unauthorized"})
+						return
+					}
+					_, err := handler.db.GetApiKeyByKey(apiKey)
+					if err != nil {
+						c.JSON(http.StatusUnauthorized, gin.H{"error": "error.invalidApiKey"})
+						return
+					}
+				}
 				handler.mcpServer.ServeSteamableHTTP(c.Writer, c.Request)
 				return
 			}
@@ -257,8 +325,163 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 	return r
 }
 
-// io.ReadSeeker 接口定义
-type readSeeker interface {
-	io.Reader
-	io.Seeker
+// JWTClaims JWT声明
+type JWTClaims struct {
+	UserID   string `json:"user_id"`
+	Username string `json:"username"`
+	jwt.RegisteredClaims
+}
+
+// GenerateJWT 生成JWT Token
+func GenerateJWT(userID, username string, config *config.Config) (string, error) {
+	claims := JWTClaims{
+		UserID:   userID,
+		Username: username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour * 7)), // 7天过期
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(config.Auth.AppKey))
+}
+
+// JWTAuthenticationMiddleware JWT认证中间件
+func JWTAuthenticationMiddleware(config *config.Config, db *storage.BoltDB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !config.Auth.Enabled {
+			c.Next()
+			return
+		}
+
+		tokenString := c.GetHeader("Authorization")
+		if tokenString == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "error.unauthorized"})
+			c.Abort()
+			return
+		}
+
+		tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+		if tokenString == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "error.unauthorized"})
+			c.Abort()
+			return
+		}
+
+		// 解析JWT Token
+		token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+			return []byte(config.Auth.AppKey), nil
+		})
+
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "error.invalidToken"})
+			c.Abort()
+			return
+		}
+
+		claims, ok := token.Claims.(*JWTClaims)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "error.invalidToken"})
+			c.Abort()
+			return
+		}
+
+		// 验证用户是否存在
+		user, err := db.GetUser(claims.UserID)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "error.userNotFound"})
+			c.Abort()
+			return
+		}
+
+		// 将用户信息存入上下文
+		c.Set("user_id", user.ID)
+		c.Set("username", user.Username)
+		c.Next()
+	}
+}
+
+// ApiKeyAuthenticationMiddleware ApiKey认证中间件
+func ApiKeyAuthenticationMiddleware(config *config.Config, db *storage.BoltDB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !config.Auth.Enabled {
+			c.Next()
+			return
+		}
+
+		apiKey := c.GetHeader("X-BrowserWing-Key")
+		if apiKey == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "error.unauthorized"})
+			c.Abort()
+			return
+		}
+
+		// 验证API Key
+		key, err := db.GetApiKeyByKey(apiKey)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "error.invalidApiKey"})
+			c.Abort()
+			return
+		}
+
+		// 将用户信息存入上下文
+		c.Set("user_id", key.UserID)
+		c.Set("api_key_id", key.ID)
+		c.Next()
+	}
+}
+
+// JWTOrApiKeyAuthenticationMiddleware JWT或ApiKey认证中间件（两者任一即可）
+func JWTOrApiKeyAuthenticationMiddleware(config *config.Config, db *storage.BoltDB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !config.Auth.Enabled {
+			c.Next()
+			return
+		}
+
+		// 先尝试API Key认证
+		apiKey := c.GetHeader("X-BrowserWing-Key")
+		if apiKey != "" {
+			key, err := db.GetApiKeyByKey(apiKey)
+			if err == nil {
+				// API Key验证成功
+				c.Set("user_id", key.UserID)
+				c.Set("api_key_id", key.ID)
+				c.Next()
+				return
+			}
+		}
+
+		// API Key不存在或验证失败，尝试JWT Token
+		tokenString := c.GetHeader("Authorization")
+		if tokenString != "" {
+			tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+			if tokenString != "" {
+				// 解析JWT Token
+				token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+					return []byte(config.Auth.AppKey), nil
+				})
+
+				if err == nil && token.Valid {
+					claims, ok := token.Claims.(*JWTClaims)
+					if ok {
+						// 验证用户是否存在
+						user, err := db.GetUser(claims.UserID)
+						if err == nil {
+							// JWT验证成功
+							c.Set("user_id", user.ID)
+							c.Set("username", user.Username)
+							c.Next()
+							return
+						}
+					}
+				}
+			}
+		}
+
+		// 两种认证方式都失败
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "error.unauthorized"})
+		c.Abort()
+	}
 }

@@ -29,6 +29,20 @@ const client = axios.create({
   },
 })
 
+// 添加请求拦截器，自动添加JWT Token
+client.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
 // 添加响应拦截器，将后端返回的消息转换为i18n键
 client.interceptors.response.use(
   (response) => {
@@ -53,6 +67,15 @@ client.interceptors.response.use(
         error.response.data.message = convertToI18nKey(error.response.data.message)
       }
     }
+    
+    // 如果是401错误，跳转到登录页
+    if (error.response && error.response.status === 401) {
+      localStorage.removeItem('token')
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
+    
     return Promise.reject(error)
   }
 )
@@ -735,6 +758,125 @@ export const api = {
 }
 
 export default api
+
+// ============= 认证相关类型和API =============
+
+export interface User {
+  id: string
+  username: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ApiKey {
+  id: string
+  name: string
+  key: string
+  description: string
+  user_id: string
+  created_at: string
+  updated_at: string
+}
+
+export interface LoginResponse {
+  token: string
+  user: User
+}
+
+export interface AuthCheckResponse {
+  enabled: boolean
+}
+
+// 创建一个不带认证拦截器的客户端用于登录和检查认证
+const authClient = axios.create({
+  baseURL: API_BASE_URL.replace('/api/v1', ''),
+  headers: {
+    'Content-Type': 'application/json',
+  },
+})
+
+// 检查是否需要认证
+export const checkAuth = async (): Promise<boolean> => {
+  try {
+    const response = await authClient.get<AuthCheckResponse>('/api/v1/auth/check')
+    return response.data.enabled
+  } catch (error) {
+    return false
+  }
+}
+
+// 登录
+export const login = async (username: string, password: string): Promise<LoginResponse> => {
+  const response = await authClient.post<LoginResponse>('/api/v1/auth/login', {
+    username,
+    password,
+  })
+  return response.data
+}
+
+// 登出
+export const logout = () => {
+  localStorage.removeItem('token')
+  localStorage.removeItem('user')
+  window.location.href = '/login'
+}
+
+// 用户管理
+export const listUsers = async (): Promise<User[]> => {
+  const response = await client.get<User[]>('/users')
+  return response.data
+}
+
+export const getUser = async (id: string): Promise<User> => {
+  const response = await client.get<User>(`/users/${id}`)
+  return response.data
+}
+
+export const createUser = async (username: string, password: string): Promise<User> => {
+  const response = await client.post<User>('/users', {
+    username,
+    password,
+  })
+  return response.data
+}
+
+export const updatePassword = async (
+  id: string,
+  oldPassword: string,
+  newPassword: string
+): Promise<void> => {
+  await client.put(`/users/${id}/password`, {
+    old_password: oldPassword,
+    new_password: newPassword,
+  })
+}
+
+export const deleteUser = async (id: string): Promise<void> => {
+  await client.delete(`/users/${id}`)
+}
+
+// ApiKey管理
+export const listApiKeys = async (): Promise<ApiKey[]> => {
+  const response = await client.get<ApiKey[]>('/api-keys')
+  return response.data
+}
+
+export const getApiKey = async (id: string): Promise<ApiKey> => {
+  const response = await client.get<ApiKey>(`/api-keys/${id}`)
+  return response.data
+}
+
+export const createApiKey = async (name: string, description: string): Promise<ApiKey> => {
+  const response = await client.post<ApiKey>('/api-keys', {
+    name,
+    description,
+  })
+  return response.data
+}
+
+export const deleteApiKey = async (id: string): Promise<void> => {
+  await client.delete(`/api-keys/${id}`)
+}
 
 
 
