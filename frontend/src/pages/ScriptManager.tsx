@@ -101,6 +101,11 @@ export default function ScriptManager() {
   const [jsonInputError, setJsonInputError] = useState('')
   const importMenuRef = useRef<HTMLDivElement>(null)
   const importButtonRef = useRef<HTMLButtonElement>(null)
+  
+  // 导出方式相关
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
+  const exportButtonRef = useRef<HTMLButtonElement>(null)
 
   // 添加操作下拉菜单状态
   const [showAddActionMenu, setShowAddActionMenu] = useState(false)
@@ -149,6 +154,24 @@ export default function ScriptManager() {
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [showImportMenu])
+
+  // 点击外部区域关闭导出下拉菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showExportMenu &&
+        exportMenuRef.current &&
+        exportButtonRef.current &&
+        !exportMenuRef.current.contains(event.target as Node) &&
+        !exportButtonRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showExportMenu])
 
   const loadRecordingConfig = async () => {
     try {
@@ -1395,22 +1418,47 @@ export default function ScriptManager() {
                   <Tag className="w-4 h-4" />
                   <span>{t('script.batch.addTags')}</span>
                 </button>
-                <button
-                  onClick={handleExportScripts}
-                  className="btn-secondary text-sm flex items-center space-x-1.5"
-                  disabled={loading}
-                >
-                  <Download className="w-4 h-4" />
-                  <span>{t('common.export')}</span>
-                </button>
-                <button
-                  onClick={() => handleExportSkill(Array.from(selectedScripts))}
-                  className="btn-secondary text-sm flex items-center space-x-1.5 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/30"
-                  disabled={loading}
-                >
-                  <FileCode className="w-4 h-4" />
-                  <span>{t('script.exportSkill')}</span>
-                </button>
+                
+                {/* 导出下拉菜单 */}
+                <div className="relative">
+                  <button
+                    ref={exportButtonRef}
+                    onClick={() => setShowExportMenu(!showExportMenu)}
+                    className="btn-secondary text-sm flex items-center space-x-1.5"
+                    disabled={loading}
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>{t('common.export')}</span>
+                    <ChevronDown className={`w-4 h-4 transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showExportMenu && (
+                    <div ref={exportMenuRef} className="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 z-50">
+                      <div className="py-1">
+                        <button
+                          onClick={() => {
+                            setShowExportMenu(false)
+                            handleExportScripts()
+                          }}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                        >
+                          <Download className="w-4 h-4" />
+                          <span>{t('script.export')} JSON</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowExportMenu(false)
+                            handleExportSkill(Array.from(selectedScripts))
+                          }}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                        >
+                          <FileCode className="w-4 h-4" />
+                          <span>{t('script.exportSkill')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
                 <button
                   onClick={handleBatchDelete}
                   className="btn-secondary text-sm text-red-600 hover:bg-red-50 flex items-center space-x-1.5"
