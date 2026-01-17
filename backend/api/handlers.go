@@ -2883,10 +2883,24 @@ func (h *Handler) GetScriptsSummary(c *gin.Context) {
 func generateSkillMD(scripts []*models.Script, host string, isExportAll bool, scriptIDs []string) string {
 	var sb strings.Builder
 
+	skillDescription := "Execute browser automation scripts via HTTP API. Scripts include: "
+
+	for i, script := range scripts {
+		// 最多10个脚本描述
+		if i >= 10 {
+			break
+		}
+		if i == len(scripts)-1 || i == 9 {
+			skillDescription += script.Description
+		} else {
+			skillDescription += script.Description + ","
+		}
+	}
+
 	// YAML Frontmatter
 	sb.WriteString("---\n")
 	sb.WriteString("name: browserpilot-scripts\n")
-	sb.WriteString("description: Execute browser automation scripts via HTTP API. Use when you need to automate web tasks like data extraction, form filling, clicking, navigation, or any browser operations.\n")
+	sb.WriteString("description: " + skillDescription + "\n")
 	sb.WriteString("---\n\n")
 
 	// 主标题
