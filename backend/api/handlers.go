@@ -2753,9 +2753,11 @@ func (h *Handler) ExportScriptsSkill(c *gin.Context) {
 	// 生成 SKILL.md 内容
 	skillContent := generateSkillMD(scripts, host, isExportAll, scriptIDs)
 
+	fileName := fmt.Sprintf("SKILL_%s.md", time.Now().Format("20060102150405"))
+
 	// 返回内容
 	c.Header("Content-Type", "text/markdown; charset=utf-8")
-	c.Header("Content-Disposition", "attachment; filename=SKILL.md")
+	c.Header("Content-Disposition", "attachment; filename="+fileName)
 	c.String(http.StatusOK, skillContent)
 }
 
