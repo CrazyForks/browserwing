@@ -714,6 +714,26 @@ export default function ScriptManager() {
     setSelectedScripts(new Set())
   }
 
+  // 导出 SKILL.md
+  const handleExportSkill = async (scriptIds?: string[]) => {
+    try {
+      const response = await api.exportScriptsSkill(scriptIds)
+      const blob = new Blob([response.data], { type: 'text/markdown' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'SKILL.md'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      showMessage(t('script.exportSkillSuccess'), 'success')
+    } catch (err) {
+      console.error('Export skill error:', err)
+      showMessage(t('script.exportSkillError'), 'error')
+    }
+  }
+
   // 导出单个脚本为JSON文件
   const handleExportSingleScript = (script: Script) => {
     // 导出时不包含分组和标签
@@ -1382,6 +1402,14 @@ export default function ScriptManager() {
                 >
                   <Download className="w-4 h-4" />
                   <span>{t('common.export')}</span>
+                </button>
+                <button
+                  onClick={() => handleExportSkill(Array.from(selectedScripts))}
+                  className="btn-secondary text-sm flex items-center space-x-1.5 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/30"
+                  disabled={loading}
+                >
+                  <FileCode className="w-4 h-4" />
+                  <span>{t('script.exportSkill')}</span>
                 </button>
                 <button
                   onClick={handleBatchDelete}
@@ -3063,6 +3091,45 @@ export default function ScriptManager() {
                       <div>
                         <h5 className="font-medium text-gray-800 dark:text-gray-200 mb-1">{t('script.tutorial.http.responseFormat')}</h5>
                         <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">{t('script.tutorial.http.responseDesc')}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Claude Skills Section */}
+                <div>
+                  <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-3">{t('script.tutorial.skill.title')}</h3>
+                  <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4 mb-4">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <div className="bg-purple-100 dark:bg-purple-800 text-purple-800 dark:text-purple-200 rounded-full p-2">
+                        <Download className="w-5 h-5" />
+                      </div>
+                      <h4 className="text-lg font-medium text-purple-900 dark:text-purple-200">{t('script.tutorial.skill.usage')}</h4>
+                    </div>
+                    <p className="text-gray-700 dark:text-gray-300 mb-3">{t('script.tutorial.skill.description')}</p>
+                    
+                    <div className="space-y-3">
+                      {/* Download All Button */}
+                      <div>
+                        <button
+                          onClick={() => handleExportSkill()}
+                          className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 px-4 rounded-lg flex items-center justify-center space-x-2 transition-colors"
+                        >
+                          <Download className="w-5 h-5" />
+                          <span>{t('script.tutorial.skill.downloadAll')}</span>
+                        </button>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">{t('script.tutorial.skill.downloadAllDesc')}</p>
+                      </div>
+
+                      {/* Usage Steps */}
+                      <div className="bg-white dark:bg-gray-900 border border-purple-200 dark:border-purple-700 rounded-lg p-3">
+                        <h5 className="font-medium text-gray-800 dark:text-gray-200 mb-2">{t('script.tutorial.skill.downloadSelected')}</h5>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{t('script.tutorial.skill.downloadSelectedDesc')}</p>
+                        <ol className="list-decimal list-inside space-y-1 text-sm text-gray-700 dark:text-gray-300">
+                          <li>{t('script.tutorial.skill.usage1')}</li>
+                          <li>{t('script.tutorial.skill.usage2')}</li>
+                          <li>{t('script.tutorial.skill.usage3')}</li>
+                        </ol>
                       </div>
                     </div>
                   </div>

@@ -2697,3 +2697,547 @@ func (h *Handler) DeleteApiKey(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "success.apiKeyDeleted"})
 }
+
+// ============= Claude Skills 相关 API =============
+
+// ExportScriptsSkill 导出脚本为 Claude Skills 的 SKILL.md 格式
+func (h *Handler) ExportScriptsSkill(c *gin.Context) {
+	var req struct {
+		ScriptIDs []string `json:"script_ids"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidRequest"})
+		return
+	}
+
+	// 获取脚本列表
+	var scripts []*models.Script
+	var err error
+
+	if len(req.ScriptIDs) == 0 {
+		// 如果没有指定脚本ID，导出所有脚本
+		scripts, err = h.db.ListScripts()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "error.listScriptsFailed"})
+			return
+		}
+	} else {
+		// 导出指定的脚本
+		for _, id := range req.ScriptIDs {
+			script, err := h.db.GetScript(id)
+			if err != nil {
+				continue // 跳过不存在的脚本
+			}
+			scripts = append(scripts, script)
+		}
+	}
+
+	if len(scripts) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.noScriptsToExport"})
+		return
+	}
+
+	// 获取服务端地址
+	host := c.Request.Host
+
+	// 判断是否导出所有脚本
+	isExportAll := len(req.ScriptIDs) == 0
+
+	// 收集脚本 ID
+	scriptIDs := make([]string, len(scripts))
+	for i, script := range scripts {
+		scriptIDs[i] = script.ID
+	}
+
+	// 生成 SKILL.md 内容
+	skillContent := generateSkillMD(scripts, host, isExportAll, scriptIDs)
+
+	// 返回内容
+	c.Header("Content-Type", "text/markdown; charset=utf-8")
+	c.Header("Content-Disposition", "attachment; filename=SKILL.md")
+	c.String(http.StatusOK, skillContent)
+}
+
+// GetScriptsSummary 获取脚本摘要信息（用于 Claude Skills）
+func (h *Handler) GetScriptsSummary(c *gin.Context) {
+	// 获取脚本 ID 列表（可选）
+	idsParam := c.Query("ids")
+	var filterIDs []string
+	if idsParam != "" {
+		filterIDs = strings.Split(idsParam, ",")
+	}
+
+	// 获取所有脚本
+	allScripts, err := h.db.ListScripts()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.listScriptsFailed"})
+		return
+	}
+
+	// 如果有 ID 过滤，只返回指定的脚本
+	var scripts []*models.Script
+	if len(filterIDs) > 0 {
+		idSet := make(map[string]bool)
+		for _, id := range filterIDs {
+			idSet[strings.TrimSpace(id)] = true
+		}
+		for _, script := range allScripts {
+			if idSet[script.ID] {
+				scripts = append(scripts, script)
+			}
+		}
+	} else {
+		scripts = allScripts
+	}
+
+	// 构建摘要信息
+	type ParameterInfo struct {
+		Name        string `json:"name"`
+		Description string `json:"description,omitempty"`
+		Type        string `json:"type,omitempty"`
+		Required    bool   `json:"required,omitempty"`
+		Default     string `json:"default,omitempty"`
+	}
+
+	type ScriptSummary struct {
+		ID          string          `json:"id"`
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Parameters  []ParameterInfo `json:"parameters,omitempty"`
+		Tags        []string        `json:"tags,omitempty"`
+		Group       string          `json:"group,omitempty"`
+	}
+
+	summaries := make([]ScriptSummary, 0, len(scripts))
+	for _, script := range scripts {
+		summary := ScriptSummary{
+			ID:          script.ID,
+			Name:        script.Name,
+			Description: script.Description,
+			Tags:        script.Tags,
+			Group:       script.Group,
+		}
+
+		// 从 MCP Input Schema 提取参数信息
+		if script.MCPInputSchema != nil {
+			if properties, ok := script.MCPInputSchema["properties"].(map[string]interface{}); ok {
+				var required []string
+				if req, ok := script.MCPInputSchema["required"].([]interface{}); ok {
+					for _, r := range req {
+						if rStr, ok := r.(string); ok {
+							required = append(required, rStr)
+						}
+					}
+				}
+				requiredSet := make(map[string]bool)
+				for _, r := range required {
+					requiredSet[r] = true
+				}
+
+				for paramName, paramSchema := range properties {
+					if paramMap, ok := paramSchema.(map[string]interface{}); ok {
+						param := ParameterInfo{
+							Name:     paramName,
+							Required: requiredSet[paramName],
+						}
+						if desc, ok := paramMap["description"].(string); ok {
+							param.Description = desc
+						}
+						if paramType, ok := paramMap["type"].(string); ok {
+							param.Type = paramType
+						}
+						if defVal, ok := paramMap["default"].(string); ok {
+							param.Default = defVal
+						}
+						summary.Parameters = append(summary.Parameters, param)
+					}
+				}
+			}
+		}
+
+		// 如果没有 MCP Schema，从 Variables 提取
+		if len(summary.Parameters) == 0 && len(script.Variables) > 0 {
+			for varName, varValue := range script.Variables {
+				param := ParameterInfo{
+					Name:    varName,
+					Default: varValue,
+					Type:    "string",
+				}
+				summary.Parameters = append(summary.Parameters, param)
+			}
+		}
+
+		summaries = append(summaries, summary)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"scripts": summaries,
+		"total":   len(summaries),
+	})
+}
+
+// generateSkillMD 生成 SKILL.md 内容
+func generateSkillMD(scripts []*models.Script, host string, isExportAll bool, scriptIDs []string) string {
+	var sb strings.Builder
+
+	// YAML Frontmatter
+	sb.WriteString("---\n")
+	sb.WriteString("name: browserpilot-scripts\n")
+	sb.WriteString("description: Execute browser automation scripts via HTTP API. Use when you need to automate web tasks like data extraction, form filling, clicking, navigation, or any browser operations.\n")
+	sb.WriteString("---\n\n")
+
+	// 主标题
+	sb.WriteString("# BrowserPilot Automation Scripts\n\n")
+
+	// 简介
+	sb.WriteString("## Overview\n\n")
+	sb.WriteString("BrowserPilot provides browser automation capabilities through HTTP APIs. You can execute pre-configured scripts to automate web tasks.\n\n")
+	sb.WriteString(fmt.Sprintf("**Total Scripts Available:** %d\n\n", len(scripts)))
+	sb.WriteString(fmt.Sprintf("**API Base URL:** `http://%s/api/v1`\n\n", host))
+
+	// API 端点基础信息
+	sb.WriteString("## API Endpoints\n\n")
+
+	// 判断是否需要调用接口获取脚本列表
+	needListAPI := len(scripts) >= 5
+
+	if needListAPI {
+		// 1. 获取脚本摘要列表
+		sb.WriteString("### 1. Get Scripts Summary\n\n")
+		sb.WriteString("Get summary information for available scripts (name, description, parameters).\n\n")
+		sb.WriteString("```bash\n")
+		if isExportAll {
+			sb.WriteString(fmt.Sprintf("curl -X GET 'http://%s/api/v1/scripts/summary'\n", host))
+		} else {
+			// 限制只能获取导出的脚本
+			idsParam := strings.Join(scriptIDs, ",")
+			sb.WriteString(fmt.Sprintf("curl -X GET 'http://%s/api/v1/scripts/summary?ids=%s'\n", host, idsParam))
+		}
+		sb.WriteString("```\n\n")
+		sb.WriteString("**Response Example:**\n")
+		sb.WriteString("```json\n")
+		sb.WriteString("{\n")
+		sb.WriteString("  \"scripts\": [\n")
+		sb.WriteString("    {\n")
+		sb.WriteString("      \"id\": \"script-id\",\n")
+		sb.WriteString("      \"name\": \"Script Name\",\n")
+		sb.WriteString("      \"description\": \"What this script does\",\n")
+		sb.WriteString("      \"url\": \"https://target-website.com\",\n")
+		sb.WriteString("      \"parameters\": [\n")
+		sb.WriteString("        {\n")
+		sb.WriteString("          \"name\": \"username\",\n")
+		sb.WriteString("          \"description\": \"User login name\",\n")
+		sb.WriteString("          \"type\": \"string\",\n")
+		sb.WriteString("          \"required\": true\n")
+		sb.WriteString("        }\n")
+		sb.WriteString("      ],\n")
+		sb.WriteString("      \"tags\": [\"login\", \"authentication\"],\n")
+		sb.WriteString("      \"group\": \"User Management\"\n")
+		sb.WriteString("    }\n")
+		sb.WriteString("  ],\n")
+		sb.WriteString("  \"total\": 10\n")
+		sb.WriteString("}\n")
+		sb.WriteString("```\n\n")
+		if !isExportAll {
+			sb.WriteString("**Note:** This endpoint is restricted to only return the scripts included in this SKILL.md file.\n\n")
+		}
+	}
+
+	// 执行脚本接口
+	apiNumber := 1
+	if needListAPI {
+		apiNumber = 2
+	}
+	sb.WriteString(fmt.Sprintf("### %d. Execute Script\n\n", apiNumber))
+	sb.WriteString("Run a script with optional parameters.\n\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X POST 'http://%s/api/v1/scripts/{{script_id}}/play' \\\n", host))
+	sb.WriteString("  -H 'Content-Type: application/json' \\\n")
+	sb.WriteString("  -d '{\n")
+	sb.WriteString("    \"params\": {\n")
+	sb.WriteString("      \"parameter_name\": \"value\"\n")
+	sb.WriteString("    }\n")
+	sb.WriteString("  }'\n")
+	sb.WriteString("```\n\n")
+	sb.WriteString("**Request Body:**\n")
+	sb.WriteString("- `params` (optional): Object mapping parameter names to values. Check script's parameters to see which are required.\n\n")
+	sb.WriteString("**Response:**\n")
+	sb.WriteString("```json\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"message\": \"success.scriptPlaybackCompleted\",\n")
+	sb.WriteString("  \"result\": {\n")
+	sb.WriteString("    \"success\": true,\n")
+	sb.WriteString("    \"extracted_data\": {\n")
+	sb.WriteString("      \"variable_name\": \"extracted_value\"\n")
+	sb.WriteString("    }\n")
+	sb.WriteString("  }\n")
+	sb.WriteString("}\n")
+	sb.WriteString("```\n\n")
+
+	// 如果脚本数量少于 5 个，直接列出所有脚本信息
+	if len(scripts) < 5 {
+		sb.WriteString("## Available Scripts\n\n")
+		for i, script := range scripts {
+			sb.WriteString(fmt.Sprintf("### %d. %s\n\n", i+1, script.Name))
+			sb.WriteString(fmt.Sprintf("**ID:** `%s`\n\n", script.ID))
+			if script.Description != "" {
+				sb.WriteString(fmt.Sprintf("**Description:** %s\n\n", script.Description))
+			}
+			if script.URL != "" {
+				sb.WriteString(fmt.Sprintf("**Target URL:** `%s`\n\n", script.URL))
+			}
+
+			// 显示参数（从 MCP Schema 或 Variables 提取）
+			hasParams := false
+			if script.MCPInputSchema != nil {
+				if properties, ok := script.MCPInputSchema["properties"].(map[string]interface{}); ok && len(properties) > 0 {
+					sb.WriteString("**Parameters:**\n")
+					hasParams = true
+
+					var required []string
+					if req, ok := script.MCPInputSchema["required"].([]interface{}); ok {
+						for _, r := range req {
+							if rStr, ok := r.(string); ok {
+								required = append(required, rStr)
+							}
+						}
+					}
+					requiredSet := make(map[string]bool)
+					for _, r := range required {
+						requiredSet[r] = true
+					}
+
+					for paramName, paramSchema := range properties {
+						if paramMap, ok := paramSchema.(map[string]interface{}); ok {
+							isRequired := requiredSet[paramName]
+							requiredText := ""
+							if isRequired {
+								requiredText = " **(required)**"
+							}
+
+							sb.WriteString(fmt.Sprintf("- `%s`%s", paramName, requiredText))
+
+							if paramType, ok := paramMap["type"].(string); ok {
+								sb.WriteString(fmt.Sprintf(" - Type: %s", paramType))
+							}
+							if desc, ok := paramMap["description"].(string); ok {
+								sb.WriteString(fmt.Sprintf(" - %s", desc))
+							}
+							if defVal, ok := paramMap["default"]; ok {
+								sb.WriteString(fmt.Sprintf(" - Default: `%v`", defVal))
+							}
+							sb.WriteString("\n")
+						}
+					}
+					sb.WriteString("\n")
+				}
+			}
+
+			if !hasParams && len(script.Variables) > 0 {
+				sb.WriteString("**Parameters:**\n")
+				for varName, varValue := range script.Variables {
+					if varValue != "" {
+						sb.WriteString(fmt.Sprintf("- `%s` - Default: `%s`\n", varName, varValue))
+					} else {
+						sb.WriteString(fmt.Sprintf("- `%s` **(required)**\n", varName))
+					}
+				}
+				sb.WriteString("\n")
+			}
+
+			if len(script.Tags) > 0 {
+				sb.WriteString(fmt.Sprintf("**Tags:** %s\n\n", strings.Join(script.Tags, ", ")))
+			}
+
+			// 执行示例
+			sb.WriteString("**Execution Example:**\n")
+			sb.WriteString("```bash\n")
+			sb.WriteString(fmt.Sprintf("curl -X POST 'http://%s/api/v1/scripts/%s/play'", host, script.ID))
+
+			// 根据参数生成示例
+			needParams := false
+			if script.MCPInputSchema != nil {
+				if properties, ok := script.MCPInputSchema["properties"].(map[string]interface{}); ok && len(properties) > 0 {
+					needParams = true
+				}
+			} else if len(script.Variables) > 0 {
+				needParams = true
+			}
+
+			if needParams {
+				sb.WriteString(" \\\n  -H 'Content-Type: application/json' \\\n  -d '{\n    \"params\": {\n")
+
+				if script.MCPInputSchema != nil {
+					if properties, ok := script.MCPInputSchema["properties"].(map[string]interface{}); ok {
+						i := 0
+						propCount := len(properties)
+						for paramName := range properties {
+							comma := ","
+							if i == propCount-1 {
+								comma = ""
+							}
+							sb.WriteString(fmt.Sprintf("      \"%s\": \"<value>\"%s\n", paramName, comma))
+							i++
+						}
+					}
+				} else {
+					i := 0
+					varCount := len(script.Variables)
+					for varName := range script.Variables {
+						comma := ","
+						if i == varCount-1 {
+							comma = ""
+						}
+						sb.WriteString(fmt.Sprintf("      \"%s\": \"<value>\"%s\n", varName, comma))
+						i++
+					}
+				}
+				sb.WriteString("    }\n  }'")
+			}
+			sb.WriteString("\n```\n\n")
+		}
+	}
+
+	// 使用说明
+	sb.WriteString("## Instructions\n\n")
+	sb.WriteString("**Step-by-step workflow:**\n\n")
+	sb.WriteString("1. **Understand the request:** Identify what web automation task the user needs.\n\n")
+
+	if needListAPI {
+		sb.WriteString("2. **Fetch script list:** Call `GET /api/v1/scripts/summary` to see all available scripts with their parameters.\n\n")
+		sb.WriteString("3. **Select appropriate script:** Based on script names, descriptions, parameters, and target URLs, choose the most relevant script.\n\n")
+		sb.WriteString("4. **Collect parameters:** Check the script's `parameters` array. For each parameter where `required: true`, ask the user for a value or determine it from context.\n\n")
+		sb.WriteString("5. **Execute script:** Call `POST /api/v1/scripts/{script_id}/play` with parameters in the request body.\n\n")
+		sb.WriteString("6. **Present results:** Parse the response and show:\n")
+	} else {
+		sb.WriteString("2. **Select script:** Choose from the available scripts listed above based on the user's needs.\n\n")
+		sb.WriteString("3. **Check parameters:** Review the script's parameter list. Ask the user for required parameter values.\n\n")
+		sb.WriteString("4. **Execute script:** Call `POST /api/v1/scripts/{script_id}/play` with parameters in the request body.\n\n")
+		sb.WriteString("5. **Present results:** Parse the response and show:\n")
+	}
+
+	sb.WriteString("   - Execution status (`success: true/false`)\n")
+	sb.WriteString("   - Extracted data (in `extracted_data` field)\n")
+	sb.WriteString("   - Any error messages\n\n")
+
+	// 完整示例
+	if len(scripts) > 0 {
+		example := scripts[0]
+		sb.WriteString("## Complete Example\n\n")
+
+		if example.Description != "" {
+			sb.WriteString(fmt.Sprintf("**User Request:** \"%s\"\n\n", example.Description))
+		} else {
+			sb.WriteString(fmt.Sprintf("**User Request:** \"Run the %s script\"\n\n", example.Name))
+		}
+
+		sb.WriteString("**Your Actions:**\n\n")
+
+		stepNum := 1
+		if needListAPI {
+			sb.WriteString(fmt.Sprintf("%d. Fetch script list:\n", stepNum))
+			sb.WriteString("```bash\n")
+			if isExportAll {
+				sb.WriteString(fmt.Sprintf("curl -X GET 'http://%s/api/v1/scripts/summary'\n", host))
+			} else {
+				idsParam := strings.Join(scriptIDs, ",")
+				sb.WriteString(fmt.Sprintf("curl -X GET 'http://%s/api/v1/scripts/summary?ids=%s'\n", host, idsParam))
+			}
+			sb.WriteString("```\n\n")
+			stepNum++
+
+			sb.WriteString(fmt.Sprintf("%d. Found script: `%s` (ID: `%s`)\n\n", stepNum, example.Name, example.ID))
+			stepNum++
+		} else {
+			sb.WriteString(fmt.Sprintf("%d. Select script: `%s` (ID: `%s`)\n\n", stepNum, example.Name, example.ID))
+			stepNum++
+		}
+
+		// 检查是否有参数
+		hasParams := false
+		if example.MCPInputSchema != nil {
+			if properties, ok := example.MCPInputSchema["properties"].(map[string]interface{}); ok && len(properties) > 0 {
+				hasParams = true
+			}
+		} else if len(example.Variables) > 0 {
+			hasParams = true
+		}
+
+		if hasParams {
+			sb.WriteString(fmt.Sprintf("%d. Collect required parameters from user.\n\n", stepNum))
+			stepNum++
+		}
+
+		sb.WriteString(fmt.Sprintf("%d. Execute the script", stepNum))
+		if hasParams {
+			sb.WriteString(":\n")
+			sb.WriteString("```bash\n")
+			sb.WriteString(fmt.Sprintf("curl -X POST 'http://%s/api/v1/scripts/%s/play' \\\n", host, example.ID))
+			sb.WriteString("  -H 'Content-Type: application/json' \\\n")
+			sb.WriteString("  -d '{\n    \"params\": {\n")
+
+			if example.MCPInputSchema != nil {
+				if properties, ok := example.MCPInputSchema["properties"].(map[string]interface{}); ok {
+					i := 0
+					propCount := len(properties)
+					for paramName := range properties {
+						comma := ","
+						if i == propCount-1 {
+							comma = ""
+						}
+						sb.WriteString(fmt.Sprintf("      \"%s\": \"value\"%s\n", paramName, comma))
+						i++
+					}
+				}
+			} else {
+				i := 0
+				varCount := len(example.Variables)
+				for varName := range example.Variables {
+					comma := ","
+					if i == varCount-1 {
+						comma = ""
+					}
+					sb.WriteString(fmt.Sprintf("      \"%s\": \"value\"%s\n", varName, comma))
+					i++
+				}
+			}
+			sb.WriteString("    }\n  }'\n")
+		} else {
+			sb.WriteString(":\n")
+			sb.WriteString("```bash\n")
+			sb.WriteString(fmt.Sprintf("curl -X POST 'http://%s/api/v1/scripts/%s/play'\n", host, example.ID))
+		}
+		sb.WriteString("```\n\n")
+		stepNum++
+
+		sb.WriteString(fmt.Sprintf("%d. Present the extracted data to the user.\n\n", stepNum))
+	}
+
+	// 最佳实践
+	sb.WriteString("## Guidelines\n\n")
+	if needListAPI {
+		sb.WriteString("- **Always fetch script list first** to see available scripts and their parameters\n")
+		sb.WriteString("- **Check parameter requirements** - look at the `required` field for each parameter\n")
+	} else {
+		sb.WriteString("- **Review script details** carefully including parameters and their requirements\n")
+	}
+	sb.WriteString("- **Match URLs carefully** - ensure the script's target URL matches the user's request\n")
+	sb.WriteString("- **Check parameter descriptions** - they provide context about what values are expected\n")
+	sb.WriteString("- **Handle errors gracefully** - if execution fails, explain the error to the user\n")
+	sb.WriteString("- **Present data clearly** - format extracted data in a readable way for the user\n")
+	sb.WriteString("- **Don't assume parameters** - if a required parameter is unclear, ask the user for clarification\n")
+	if !isExportAll {
+		sb.WriteString("- **Stay within scope** - only use the scripts provided in this SKILL.md file\n")
+	}
+	sb.WriteString("\n")
+
+	// 注意事项
+	sb.WriteString("## Important Notes\n\n")
+	sb.WriteString("- The browser must be started before executing scripts\n")
+	sb.WriteString("- Scripts run in the actual browser, so execution may take a few seconds\n")
+	sb.WriteString("- Some scripts may require authentication cookies or specific browser state\n")
+	sb.WriteString("- Always replace `<host>` with the actual BrowserPilot API host address\n\n")
+
+	return sb.String()
+}

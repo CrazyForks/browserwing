@@ -613,6 +613,10 @@ export const api = {
   batchDeleteScripts: (scriptIds: string[]) =>
     client.post<{ message: string; count: number }>('/scripts/batch/delete', { script_ids: scriptIds }),
 
+  // 导出脚本为 SKILL.md
+  exportScriptsSkill: (scriptIds?: string[]) =>
+    client.post('/scripts/export/skill', { script_ids: scriptIds || [] }, { responseType: 'blob' }),
+
   // AI 提取相关
   generateExtractionJS: (data: { html: string; description?: string }) =>
     client.post<{ javascript: string; used_model: string; message: string }>('/browser/generate-extraction-js', data),

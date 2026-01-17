@@ -113,6 +113,10 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 			scripts.POST("/batch/group", handler.BatchSetGroup)       // 批量设置分组
 			scripts.POST("/batch/tags", handler.BatchAddTags)         // 批量添加标签
 			scripts.POST("/batch/delete", handler.BatchDeleteScripts) // 批量删除
+
+			// Claude Skills 导出
+			scripts.POST("/export/skill", handler.ExportScriptsSkill) // 导出 SKILL.md
+			scripts.GET("/summary", handler.GetScriptsSummary)        // 获取脚本摘要（用于 Claude Skills）
 		}
 
 		// PlayScript接口使用JWT或ApiKey认证（支持内部和外部调用）
