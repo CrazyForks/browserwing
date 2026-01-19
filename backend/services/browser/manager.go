@@ -536,7 +536,7 @@ func (m *Manager) OpenPage(url string, language string, norecord ...bool) error 
 	}
 
 	if err := page.Timeout(60 * time.Second).WaitLoad(); err != nil {
-		return fmt.Errorf("failed to wait for page load: %w", err)
+		logger.Warn(ctx, "Failed to wait for page load: %v", err)
 	}
 
 	// 为当前页面授予剪贴板权限

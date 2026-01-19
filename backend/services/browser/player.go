@@ -444,7 +444,7 @@ func (p *Player) PlayScript(ctx context.Context, page *rod.Page, script *models.
 			return fmt.Errorf("navigation failed: %w", err)
 		}
 		if err := page.WaitLoad(); err != nil {
-			return fmt.Errorf("failed to wait for page to load: %w", err)
+			logger.Warn(ctx, "Failed to wait for page to load: %v", err)
 		}
 		// 等待页面稳定
 		time.Sleep(2 * time.Second)
