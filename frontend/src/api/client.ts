@@ -147,6 +147,28 @@ export interface BrowserConfig {
   updated_at: string
 }
 
+export interface BrowserInstance {
+  id: string
+  name: string
+  description: string
+  is_default: boolean
+  is_active: boolean
+  type: 'local' | 'remote'  // 实例类型
+  // 本地浏览器配置
+  bin_path?: string
+  user_data_dir?: string
+  // 远程浏览器配置
+  control_url?: string
+  // 可选的浏览器行为配置
+  user_agent?: string
+  use_stealth?: boolean | null
+  headless?: boolean | null
+  launch_args?: string[]
+  proxy?: string
+  created_at: string
+  updated_at: string
+}
+
 export interface GenerateRequest {
   fetcher_name: string
   fetch_params: Record<string, string>
@@ -568,6 +590,34 @@ export const api = {
   importBrowserCookies: (data: { cookies: any[] }) =>
     client.post<{ message: string; count: number }>('/browser/cookies/import', data),
 
+  // 浏览器实例管理
+  createBrowserInstance: (data: Partial<BrowserInstance>) =>
+    client.post<{ message: string; instance: BrowserInstance }>('/browser/instances', data),
+
+  listBrowserInstances: () =>
+    client.get<{ instances: BrowserInstance[] }>('/browser/instances'),
+
+  getBrowserInstance: (id: string) =>
+    client.get<{ instance: BrowserInstance }>(`/browser/instances/${id}`),
+
+  updateBrowserInstance: (id: string, data: Partial<BrowserInstance>) =>
+    client.put<{ message: string; instance: BrowserInstance }>(`/browser/instances/${id}`, data),
+
+  deleteBrowserInstance: (id: string) =>
+    client.delete<{ message: string }>(`/browser/instances/${id}`),
+
+  startBrowserInstance: (id: string) =>
+    client.post<{ message: string }>(`/browser/instances/${id}/start`),
+
+  stopBrowserInstance: (id: string) =>
+    client.post<{ message: string }>(`/browser/instances/${id}/stop`),
+
+  switchBrowserInstance: (id: string) =>
+    client.post<{ message: string }>(`/browser/instances/${id}/switch`),
+
+  getCurrentBrowserInstance: () =>
+    client.get<{ instance: BrowserInstance }>('/browser/instances/current'),
+
   // 录制相关
   startRecording: () =>
     client.post<{ message: string }>('/browser/record/start'),
@@ -600,8 +650,11 @@ export const api = {
   deleteScript: (id: string) =>
     client.delete<{ message: string }>(`/scripts/${id}`),
 
-  playScript: (id: string, params?: Record<string, string>) =>
-    client.post<{ message: string; script: string; result: PlayResult }>(`/scripts/${id}/play`, { params }),
+  playScript: (id: string, params?: Record<string, string>, instanceId?: string) =>
+    client.post<{ message: string; script: string; result: PlayResult }>(`/scripts/${id}/play`, { 
+      params,
+      instance_id: instanceId 
+    }),
 
   // 脚本批量操作
   batchSetGroup: (scriptIds: string[], group: string) =>

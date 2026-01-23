@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { api, Script, ScriptAction, BrowserConfig } from '../api/client'
-import { Power, PowerOff, Loader, ExternalLink, RefreshCw, Save, Video, Play, Settings, Cookie } from 'lucide-react'
+import { api, Script, ScriptAction, BrowserConfig, BrowserInstance } from '../api/client'
+import { Power, PowerOff, Loader, ExternalLink, RefreshCw, Save, Video, Play, Settings, Cookie, Monitor } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import Toast from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -51,11 +51,16 @@ export default function BrowserManager() {
   const [recordedActions, setRecordedActions] = useState<ScriptAction[]>([])
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [scriptName, setScriptName] = useState('')
+  const [selectedInstanceForPlay, setSelectedInstanceForPlay] = useState<string>('') // 选择用于执行脚本的实例
   const [scriptDescription, setScriptDescription] = useState('')
   const [hasShownStopMessage, setHasShownStopMessage] = useState(false) // 标记是否已显示停止消息
   
   // 历史访问记录状态
   const [historyLinks, setHistoryLinks] = useState<string[]>([])
+
+  // 浏览器实例相关状态
+  const [instances, setInstances] = useState<BrowserInstance[]>([])
+  const [currentInstance, setCurrentInstance] = useState<BrowserInstance | null>(null)
 
   // 浏览器配置相关状态
   const [showConfigModal, setShowConfigModal] = useState(false)
@@ -89,6 +94,8 @@ export default function BrowserManager() {
     loadStatus()
     loadScripts()
     loadConfigs()
+    loadInstances()
+    loadCurrentInstance()
     
     // 定时刷新状态和录制状态
     const interval = setInterval(() => {
@@ -232,6 +239,35 @@ export default function BrowserManager() {
     }
   }
 
+  const loadInstances = async () => {
+    try {
+      const response = await api.listBrowserInstances()
+      setInstances(response.data.instances || [])
+    } catch (err) {
+      console.error('获取浏览器实例失败:', err)
+    }
+  }
+
+  const loadCurrentInstance = async () => {
+    try {
+      const response = await api.getCurrentBrowserInstance()
+      setCurrentInstance(response.data.instance || null)
+    } catch (err) {
+      // 没有当前实例
+      setCurrentInstance(null)
+    }
+  }
+
+  const handleSwitchInstance = async (id: string) => {
+    try {
+      await api.switchBrowserInstance(id)
+      showMessage(t('browser.instance.switchSuccess'), 'success')
+      await loadCurrentInstance()
+    } catch (err: any) {
+      showMessage(t(err.response?.data?.error || 'browser.instance.switchError'), 'error')
+    }
+  }
+
   // 保存配置
   const handleSaveConfig = async () => {
     if (!configForm.name.trim()) {
@@ -338,7 +374,9 @@ export default function BrowserManager() {
   const handlePlayScript = async (scriptId: string) => {
     try {
       setExecutingScript(true)
-      const response = await api.playScript(scriptId)
+      // 使用选中的实例（如果有）或使用当前实例
+      const instanceId = selectedInstanceForPlay || currentInstance?.id || ''
+      const response = await api.playScript(scriptId, undefined, instanceId)
       showMessage(t(response.data.message), 'success')
     } catch (err: any) {
       showMessage(t(err.response?.data?.error || 'browser.messages.scriptPlayError'), 'error')
@@ -399,11 +437,42 @@ export default function BrowserManager() {
       {/* Status and Control Card */}
       <div className="card">
         <div className="flex items-center justify-between mb-5 pb-3 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg lg:text-xl font-semibold text-gray-900 dark:text-gray-100 flex items-center space-x-2">
-            <div className={`w-3 h-3 rounded-full ${status.is_running ? 'bg-gray-900 dark:bg-gray-100' : 'bg-gray-300 dark:bg-gray-600'}`}></div>
-            <span>{t('browser.control.title')}</span>
-          </h2>
+          <div className="flex items-center space-x-4">
+            <h2 className="text-lg lg:text-xl font-semibold text-gray-900 dark:text-gray-100 flex items-center space-x-2">
+              <div className={`w-3 h-3 rounded-full ${status.is_running ? 'bg-gray-900 dark:bg-gray-100' : 'bg-gray-300 dark:bg-gray-600'}`}></div>
+              <span>{t('browser.control.title')}</span>
+            </h2>
+            {/* 浏览器实例选择器 */}
+            {instances.length > 0 && (
+              <div className="flex items-center space-x-2">
+                <select
+                  value={currentInstance?.id || ''}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      handleSwitchInstance(e.target.value)
+                    }
+                  }}
+                  disabled={instances.filter(i => i.is_active).length === 0}
+                  className="input text-sm py-1 px-2"
+                >
+                  <option value="">{t('browser.instance.selectInstance')}</option>
+                  {instances.filter(i => i.is_active).map((instance) => (
+                    <option key={instance.id} value={instance.id}>
+                      {instance.name} {instance.is_default ? `(${t('browser.instance.default')})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
           <div className="flex items-center space-x-2">
+            <button
+              onClick={() => navigate('/browser/instances')}
+              className="btn-ghost p-2"
+              title={t('browser.instance.manage')}
+            >
+              <Monitor className="w-5 h-5" />
+            </button>
             <button
               onClick={() => {
                 setEditingConfig(null)
@@ -643,6 +712,27 @@ export default function BrowserManager() {
             </h2>
 
             <div className="space-y-4">
+              {/* 实例选择器（仅显示运行中的实例） */}
+              {instances.filter(i => i.is_active).length > 1 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    {t('browser.script.selectInstance')}
+                  </label>
+                  <select
+                    value={selectedInstanceForPlay}
+                    onChange={(e) => setSelectedInstanceForPlay(e.target.value)}
+                    className="input w-full"
+                  >
+                    <option value="">{t('browser.script.useCurrentInstance')}</option>
+                    {instances.filter(i => i.is_active).map((instance) => (
+                      <option key={instance.id} value={instance.id}>
+                        {instance.name} {instance.id === currentInstance?.id ? `(${t('browser.instance.current')})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="flex items-center space-x-3">
                 <select
                   value=""

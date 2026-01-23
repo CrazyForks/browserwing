@@ -51,7 +51,8 @@ func (bc *BrowserClient) OpenPage(ctx context.Context, url string) error {
 		return fmt.Errorf("browser is not running, please start browser first")
 	}
 
-	return bc.client.browserManager.OpenPage(url, "")
+	// 使用当前实例（传空字符串）
+	return bc.client.browserManager.OpenPage(url, "", "")
 }
 
 // GetStatus 获取浏览器状态

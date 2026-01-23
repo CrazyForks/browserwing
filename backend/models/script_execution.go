@@ -9,6 +9,8 @@ type ScriptExecution struct {
 	ID          string    `json:"id"`           // 执行记录 ID
 	ScriptID    string    `json:"script_id"`    // 关联的脚本 ID
 	ScriptName  string    `json:"script_name"`  // 脚本名称（冗余，方便查询）
+	InstanceID  string    `json:"instance_id"`  // 浏览器实例 ID
+	InstanceName string   `json:"instance_name,omitempty"` // 浏览器实例名称（冗余，方便查询）
 	StartTime   time.Time `json:"start_time"`   // 开始时间
 	EndTime     time.Time `json:"end_time"`     // 结束时间
 	Duration    int64     `json:"duration"`     // 执行耗时（毫秒）

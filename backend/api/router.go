@@ -80,6 +80,17 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 			browserAPI.POST("/record/stop", handler.StopRecording)
 			browserAPI.GET("/record/status", handler.GetRecordingStatus)
 			browserAPI.POST("/record/clear-state", handler.ClearInPageRecordingState)
+			
+			// 浏览器实例管理
+			browserAPI.POST("/instances", handler.CreateBrowserInstance)
+			browserAPI.GET("/instances", handler.ListBrowserInstances)
+			browserAPI.GET("/instances/current", handler.GetCurrentBrowserInstance)
+			browserAPI.GET("/instances/:id", handler.GetBrowserInstance)
+			browserAPI.PUT("/instances/:id", handler.UpdateBrowserInstance)
+			browserAPI.DELETE("/instances/:id", handler.DeleteBrowserInstance)
+			browserAPI.POST("/instances/:id/start", handler.StartBrowserInstance)
+			browserAPI.POST("/instances/:id/stop", handler.StopBrowserInstance)
+			browserAPI.POST("/instances/:id/switch", handler.SwitchBrowserInstance)
 		}
 
 		// Cookie 管理

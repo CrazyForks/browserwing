@@ -126,8 +126,9 @@ func (h *Handler) BrowserStatus(c *gin.Context) {
 // OpenBrowserPage 在浏览器中打开页面
 func (h *Handler) OpenBrowserPage(c *gin.Context) {
 	var req struct {
-		URL      string `json:"url" binding:"required"`
-		Language string `json:"language"` // 前端当前语言
+		URL        string `json:"url" binding:"required"`
+		Language   string `json:"language"`    // 前端当前语言
+		InstanceID string `json:"instance_id"` // 指定实例ID，空字符串表示使用当前实例
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -140,7 +141,7 @@ func (h *Handler) OpenBrowserPage(c *gin.Context) {
 		return
 	}
 
-	if err := h.browserManager.OpenPage(req.URL, req.Language); err != nil {
+	if err := h.browserManager.OpenPage(req.URL, req.Language, req.InstanceID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.openPageFailed"})
 		return
 	}
@@ -291,12 +292,18 @@ func (h *Handler) GetCookies(c *gin.Context) {
 
 // StartRecording 开始录制操作
 func (h *Handler) StartRecording(c *gin.Context) {
+	var req struct {
+		InstanceID string `json:"instance_id"` // 指定实例ID，空字符串表示使用当前实例
+	}
+	// 尝试解析请求体，如果失败或为空则使用默认值
+	_ = c.ShouldBindJSON(&req)
+
 	if !h.browserManager.IsRunning() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "error.browserNotRunning"})
 		return
 	}
 
-	if err := h.browserManager.StartRecording(c.Request.Context()); err != nil {
+	if err := h.browserManager.StartRecording(c.Request.Context(), req.InstanceID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.startRecordingFailed"})
 		return
 	}
@@ -615,7 +622,8 @@ func (h *Handler) PlayScript(c *gin.Context) {
 
 	// 解析请求体中的参数
 	var req struct {
-		Params map[string]string `json:"params"`
+		Params     map[string]string `json:"params"`
+		InstanceID string            `json:"instance_id"` // 指定实例ID，空字符串表示使用当前实例
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// 如果没有请求体或解析失败,使用空参数
@@ -679,7 +687,7 @@ func (h *Handler) PlayScript(c *gin.Context) {
 	}
 
 	// 执行回放
-	result, page, err := h.browserManager.PlayScript(c.Request.Context(), scriptToRun)
+	result, page, err := h.browserManager.PlayScript(c.Request.Context(), scriptToRun, req.InstanceID)
 	if err != nil {
 		logger.Error(c.Request.Context(), "Failed to play script: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -4939,4 +4947,180 @@ func generateExecutorSkillMD(host string) string {
 	sb.WriteString("```\n\n")
 
 	return sb.String()
+}
+
+// ==================== 浏览器实例管理 ====================
+
+// CreateBrowserInstance 创建浏览器实例
+func (h *Handler) CreateBrowserInstance(c *gin.Context) {
+	var instance models.BrowserInstance
+	if err := c.ShouldBindJSON(&instance); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidRequest", "detail": err.Error()})
+		return
+	}
+
+	// 生成ID
+	if instance.ID == "" {
+		instance.ID = fmt.Sprintf("instance-%d", time.Now().UnixNano())
+	}
+
+	// 设置时间
+	instance.CreatedAt = time.Now()
+	instance.UpdatedAt = time.Now()
+
+	// 保存到数据库
+	if err := h.db.SaveBrowserInstance(&instance); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.saveFailed", "detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "success.instanceCreated",
+		"instance": instance,
+	})
+}
+
+// ListBrowserInstances 列出所有浏览器实例
+func (h *Handler) ListBrowserInstances(c *gin.Context) {
+	instances, err := h.db.ListBrowserInstances()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.loadFailed", "detail": err.Error()})
+		return
+	}
+
+	// 标记运行中的实例
+	runningInstances := h.browserManager.ListRunningInstances()
+	runningIDs := make(map[string]bool)
+	for _, inst := range runningInstances {
+		runningIDs[inst.ID] = true
+	}
+
+	for i := range instances {
+		instances[i].IsActive = runningIDs[instances[i].ID]
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"instances": instances,
+	})
+}
+
+// GetBrowserInstance 获取浏览器实例详情
+func (h *Handler) GetBrowserInstance(c *gin.Context) {
+	id := c.Param("id")
+	
+	instance, err := h.db.GetBrowserInstance(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "error.notFound", "detail": err.Error()})
+		return
+	}
+
+	// 检查是否正在运行
+	runtime, _ := h.browserManager.GetInstanceRuntime(id)
+	if runtime != nil {
+		instance.IsActive = true
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"instance": instance,
+	})
+}
+
+// UpdateBrowserInstance 更新浏览器实例
+func (h *Handler) UpdateBrowserInstance(c *gin.Context) {
+	id := c.Param("id")
+	
+	var instance models.BrowserInstance
+	if err := c.ShouldBindJSON(&instance); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidRequest", "detail": err.Error()})
+		return
+	}
+
+	instance.ID = id
+	if err := h.db.UpdateBrowserInstance(id, &instance); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.updateFailed", "detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "success.instanceUpdated",
+		"instance": instance,
+	})
+}
+
+// DeleteBrowserInstance 删除浏览器实例
+func (h *Handler) DeleteBrowserInstance(c *gin.Context) {
+	id := c.Param("id")
+	
+	// 检查是否正在运行
+	if runtime, _ := h.browserManager.GetInstanceRuntime(id); runtime != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.instanceRunning", "detail": "Please stop the instance before deleting"})
+		return
+	}
+
+	if err := h.db.DeleteBrowserInstance(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.deleteFailed", "detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success.instanceDeleted",
+	})
+}
+
+// StartBrowserInstance 启动浏览器实例
+func (h *Handler) StartBrowserInstance(c *gin.Context) {
+	id := c.Param("id")
+	
+	ctx := context.Background()
+	if err := h.browserManager.StartInstance(ctx, id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.startFailed", "detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success.instanceStarted",
+	})
+}
+
+// StopBrowserInstance 停止浏览器实例
+func (h *Handler) StopBrowserInstance(c *gin.Context) {
+	id := c.Param("id")
+	
+	ctx := context.Background()
+	if err := h.browserManager.StopInstance(ctx, id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.stopFailed", "detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success.instanceStopped",
+	})
+}
+
+// SwitchBrowserInstance 切换当前活动实例
+func (h *Handler) SwitchBrowserInstance(c *gin.Context) {
+	id := c.Param("id")
+	
+	ctx := context.Background()
+	if err := h.browserManager.SwitchInstance(ctx, id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.switchFailed", "detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success.instanceSwitched",
+	})
+}
+
+// GetCurrentBrowserInstance 获取当前活动实例
+func (h *Handler) GetCurrentBrowserInstance(c *gin.Context) {
+	instance := h.browserManager.GetCurrentInstance()
+	if instance == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "error.noActiveInstance"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"instance": instance,
+	})
 }

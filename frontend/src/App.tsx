@@ -4,6 +4,7 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import BrowserManager from './pages/BrowserManager'
+import BrowserInstanceManager from './pages/BrowserInstanceManager'
 import CookieManager from './pages/CookieManager'
 import ScriptManager from './pages/ScriptManager'
 import LLMManager from './pages/LLMManager'
@@ -72,6 +73,7 @@ function App() {
         >
           <Route index element={<Dashboard />} />
           <Route path="browser" element={<BrowserManager />} />
+          <Route path="browser/instances" element={<BrowserInstanceManager />} />
           <Route path="cookies" element={<CookieManager />} />
           <Route path="scripts" element={<ScriptManager />} />
           <Route path="llm" element={<LLMManager />} />

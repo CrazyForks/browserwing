@@ -43,7 +43,8 @@ func (e *Executor) Navigate(ctx context.Context, url string, opts *NavigateOptio
 	if page == nil {
 		logger.Info(ctx, "[Navigate] No active page, creating new page...")
 		// 如果没有活动页面，通过 OpenPage 创建新页面（会自动导航）
-		err := e.Browser.OpenPage(url, "", true)
+		// 使用当前实例（传空字符串），norecord=true
+		err := e.Browser.OpenPage(url, "", "", true)
 		if err != nil {
 			logger.Error(ctx, "[Navigate] Failed to open page: %s", err.Error())
 			return &OperationResult{

@@ -275,8 +275,8 @@ func (s *MCPServer) createToolHandler(script *models.Script) func(ctx context.Co
 			}
 		}
 
-		// 执行脚本
-		playResult, page, err := s.browserMgr.PlayScript(ctx, scriptToRun)
+		// 执行脚本（使用当前实例，传空字符串）
+		playResult, page, err := s.browserMgr.PlayScript(ctx, scriptToRun, "")
 		if err != nil {
 			return mcpgo.NewToolResultError(fmt.Sprintf("Failed to execute script: %v", err)), nil
 		}
@@ -463,8 +463,8 @@ func (s *MCPServer) CallTool(ctx context.Context, name string, arguments map[str
 		}
 	}
 
-	// 执行脚本
-	playResult, page, err := s.browserMgr.PlayScript(ctx, scriptToRun)
+	// 执行脚本（使用当前实例，传空字符串）
+	playResult, page, err := s.browserMgr.PlayScript(ctx, scriptToRun, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute script: %w", err)
 	}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import api, { Script, ScriptAction, RecordingConfig, ScriptExecution } from '../api/client'
+import api, { Script, ScriptAction, RecordingConfig, ScriptExecution, BrowserInstance } from '../api/client'
 import { Lightbulb, RefreshCw, Play, Trash2, Clock, FileCode, ChevronDown, ChevronUp, Edit2, X, Check, ExternalLink, GripVertical, Download, Upload, CheckSquare, Square, Copy, Tag, Folder, HelpCircle, Clipboard, Plus, Variable } from 'lucide-react'
 import Toast from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -89,6 +89,13 @@ export default function ScriptManager() {
   const [paramsDialogScript, setParamsDialogScript] = useState<Script | null>(null)
   const [scriptParameters, setScriptParameters] = useState<string[]>([])
 
+  // 实例选择相关
+  const [showInstanceSelector, setShowInstanceSelector] = useState(false)
+  const [instanceSelectorScript, setInstanceSelectorScript] = useState<Script | null>(null)
+  const [instanceSelectorParams, setInstanceSelectorParams] = useState<Record<string, string> | undefined>(undefined)
+  const [browserInstances, setBrowserInstances] = useState<BrowserInstance[]>([])
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string>('')
+
   // 导入确认相关
   const [showImportConfirm, setShowImportConfirm] = useState(false)
   const [importData, setImportData] = useState<any>(null)
@@ -132,6 +139,7 @@ export default function ScriptManager() {
     if (activeTab === 'scripts') {
       loadScripts()
       loadRecordingConfig()
+      loadBrowserInstances()
     } else if (activeTab === 'executions') {
       loadExecutions()
     }
@@ -228,17 +236,47 @@ export default function ScriptManager() {
     }
   }
 
-  const handlePlayScript = async (scriptId: string, params?: Record<string, string>) => {
+  const loadBrowserInstances = async () => {
+    try {
+      const response = await api.listBrowserInstances()
+      // 只显示运行中的实例
+      const runningInstances = (response.data.instances || []).filter(i => i.is_active)
+      setBrowserInstances(runningInstances)
+
+      // 如果没有选中的实例，自动选择当前实例
+      if (!selectedInstanceId && runningInstances.length > 0) {
+        const currentResponse = await api.getCurrentBrowserInstance()
+        if (currentResponse.data.instance) {
+          setSelectedInstanceId(currentResponse.data.instance.id)
+        } else if (runningInstances.length > 0) {
+          setSelectedInstanceId(runningInstances[0].id)
+        }
+      }
+    } catch (err) {
+      console.error('加载浏览器实例失败:', err)
+    }
+  }
+
+  const handlePlayScript = async (scriptId: string, params?: Record<string, string>, instanceId?: string) => {
     const script = scripts.find(s => s.id === scriptId)
     if (!script) return
+
+    // 如果没有指定实例 ID，并且有多个运行中的实例，显示实例选择对话框
+    if (!instanceId && browserInstances.length > 1) {
+      setInstanceSelectorScript(script)
+      setInstanceSelectorParams(params)
+      setShowInstanceSelector(true)
+      return
+    }
 
     // 如果没有提供参数,先检查脚本是否需要参数
     if (!params) {
       const requiredParams = extractScriptParameters(script)
       if (requiredParams.length > 0) {
-        // 需要参数,显示参数对话框
+        // 需要参数,显示参数对话框（同时保存实例ID）
         setParamsDialogScript(script)
         setScriptParameters(requiredParams)
+        setInstanceSelectorParams(undefined) // 清空，避免混淆
         setShowParamsDialog(true)
         return
       }
@@ -249,7 +287,9 @@ export default function ScriptManager() {
       setLoading(true)
       setExtractedData(null)
       setShowExtractedData(false)
-      const response = await api.playScript(scriptId, params)
+      // 使用指定的实例ID或默认选中的实例ID
+      const finalInstanceId = instanceId || selectedInstanceId
+      const response = await api.playScript(scriptId, params, finalInstanceId)
       showMessage(t(response.data.message), 'success')
 
       // 检查是否有抓取的数据
@@ -267,10 +307,24 @@ export default function ScriptManager() {
     }
   }
 
+  const handleInstanceSelectorConfirm = () => {
+    setShowInstanceSelector(false)
+    if (instanceSelectorScript) {
+      handlePlayScript(instanceSelectorScript.id, instanceSelectorParams, selectedInstanceId)
+    }
+  }
+
+  const handleInstanceSelectorCancel = () => {
+    setShowInstanceSelector(false)
+    setInstanceSelectorScript(null)
+    setInstanceSelectorParams(undefined)
+  }
+
   const handleParamsDialogConfirm = (params: Record<string, string>) => {
     setShowParamsDialog(false)
     if (paramsDialogScript) {
-      handlePlayScript(paramsDialogScript.id, params)
+      // 参数对话框确认后，使用选中的实例ID
+      handlePlayScript(paramsDialogScript.id, params, selectedInstanceId)
     }
   }
 
@@ -1499,6 +1553,77 @@ export default function ScriptManager() {
           type={toastType}
           onClose={() => setShowToast(false)}
         />
+      )}
+
+      {/* Browser Instance Selector Dialog */}
+      {showInstanceSelector && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                {t('script.selectInstance')}
+              </h3>
+              <button
+                onClick={handleInstanceSelectorCancel}
+                className="btn-ghost p-2"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                {t('script.selectInstanceHint')}
+              </p>
+
+              <div className="space-y-2">
+                {browserInstances.map((instance) => (
+                  <label
+                    key={instance.id}
+                    className={`flex items-center p-3 border-2 rounded-lg cursor-pointer transition-colors ${selectedInstanceId === instance.id
+                      ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-700'
+                      : 'border-gray-200 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+                      }`}
+                  >
+                    <input
+                      type="radio"
+                      name="instance"
+                      value={instance.id}
+                      checked={selectedInstanceId === instance.id}
+                      onChange={(e) => setSelectedInstanceId(e.target.value)}
+                      className="w-4 h-4 text-gray-900 dark:text-gray-100 mr-3"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900 dark:text-gray-100">
+                        {instance.name}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {instance.type === 'local' ? t('browser.instance.local') : t('browser.instance.remote')}
+                        {instance.is_default && ` • ${t('browser.instance.default')}`}
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end space-x-3">
+              <button
+                onClick={handleInstanceSelectorCancel}
+                className="btn-ghost"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={handleInstanceSelectorConfirm}
+                className="btn-primary"
+                disabled={!selectedInstanceId}
+              >
+                {t('common.confirm')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Script Parameters Dialog */}

@@ -189,8 +189,8 @@ func (sc *ScriptClient) Play(ctx context.Context, scriptID string) (*ScriptExecu
 		return nil, fmt.Errorf("script not found: %s", scriptID)
 	}
 
-	// 执行脚本
-	result, page, err := sc.client.browserManager.PlayScript(ctx, dbScript)
+	// 执行脚本（使用当前实例，传空字符串）
+	result, page, err := sc.client.browserManager.PlayScript(ctx, dbScript, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to play script: %w", err)
 	}

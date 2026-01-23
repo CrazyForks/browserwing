@@ -26,18 +26,28 @@ import (
 //go:embed scripts/float_button.js
 var floatButtonScript string
 
+// BrowserInstanceRuntime 浏览器实例运行时信息
+type BrowserInstanceRuntime struct {
+	instance   *models.BrowserInstance // 实例配置
+	browser    *rod.Browser            // 浏览器对象
+	launcher   *launcher.Launcher      // 启动器（仅本地模式）
+	activePage *rod.Page               // 当前活动页面
+	startTime  time.Time               // 启动时间
+}
+
 // Manager 浏览器管理器
 type Manager struct {
-	config                 *config.Config
-	db                     *storage.BoltDB
-	llmManager             *llm.Manager
-	browser                *rod.Browser
-	launcher               *launcher.Launcher
-	mu                     sync.Mutex
-	isRunning              bool
-	startTime              time.Time
-	recorder               *Recorder
-	activePage             *rod.Page               // 当前活动页面
+	config     *config.Config
+	db         *storage.BoltDB
+	llmManager *llm.Manager
+	mu         sync.Mutex
+	recorder   *Recorder
+
+	// 多实例管理
+	instances         map[string]*BrowserInstanceRuntime // 实例 ID -> 运行时信息
+	currentInstanceID string                             // 当前活动实例 ID
+
+	// 共享配置
 	defaultBrowserConfig   *models.BrowserConfig   // 默认浏览器配置
 	siteConfigs            []*models.BrowserConfig // 网站特定配置列表
 	lastRecordedActions    []models.ScriptAction   // 最后一次录制的动作(用于页面内停止录制)
@@ -46,6 +56,13 @@ type Manager struct {
 	inPageRecordingStopped bool                    // 标记是否是页面内停止的录制
 	currentLanguage        string                  // 当前前端语言设置
 	downloadPath           string                  // 下载目录路径
+
+	// 向后兼容（废弃）
+	browser    *rod.Browser
+	launcher   *launcher.Launcher
+	isRunning  bool
+	startTime  time.Time
+	activePage *rod.Page
 }
 
 // NewManager 创建浏览器管理器
@@ -66,6 +83,7 @@ func NewManager(cfg *config.Config, db *storage.BoltDB, llmManager *llm.Manager)
 		db:         db,
 		llmManager: llmManager,
 		recorder:   recorder,
+		instances:  make(map[string]*BrowserInstanceRuntime),
 	}
 }
 
@@ -342,10 +360,10 @@ func (m *Manager) Stop() error {
 	}
 
 	ctx := context.Background()
-	
+
 	// 检查是否是远程模式
 	isRemoteMode := m.config.Browser != nil && m.config.Browser.ControlURL != ""
-	
+
 	if isRemoteMode {
 		logger.Info(ctx, "Disconnecting from remote browser...")
 	} else {
@@ -520,7 +538,8 @@ func (m *Manager) setPageWindow(page *rod.Page) {
 }
 
 // OpenPage 打开一个新页面
-func (m *Manager) OpenPage(url string, language string, norecord ...bool) error {
+// instanceID: 指定实例ID，空字符串表示使用当前实例
+func (m *Manager) OpenPage(url string, language string, instanceID string, norecord ...bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -529,8 +548,10 @@ func (m *Manager) OpenPage(url string, language string, norecord ...bool) error 
 		noRecord = norecord[0]
 	}
 
-	if !m.isRunning || m.browser == nil {
-		return fmt.Errorf("browser is not running")
+	// 获取指定实例的浏览器
+	browser, _, _, err := m.getInstanceBrowser(instanceID)
+	if err != nil {
+		return err
 	}
 
 	// 保存当前语言设置,用于后续注入脚本时的文本替换
@@ -553,10 +574,10 @@ func (m *Manager) OpenPage(url string, language string, norecord ...bool) error 
 	}
 
 	if useStealth {
-		page = stealth.MustPage(m.browser)
+		page = stealth.MustPage(browser)
 		logger.Info(ctx, "Using Stealth mode")
 	} else {
-		page = m.browser.MustPage()
+		page = browser.MustPage()
 		logger.Info(ctx, "Not using Stealth mode")
 	}
 
@@ -590,7 +611,7 @@ func (m *Manager) OpenPage(url string, language string, norecord ...bool) error 
 				proto.BrowserPermissionTypeClipboardSanitizedWrite,
 			},
 		}
-		if err := grantPagePermissions.Call(m.browser); err != nil {
+		if err := grantPagePermissions.Call(browser); err != nil {
 			logger.Warn(ctx, "Failed to grant clipboard permissions for page: %v", err)
 		} else {
 			logger.Info(ctx, "✓ Clipboard permissions granted for page: %s", pageInfo.URL)
@@ -621,8 +642,10 @@ func (m *Manager) OpenPage(url string, language string, norecord ...bool) error 
 		go m.checkInPageRecordingRequests(ctx, page)
 	}
 
-	// 保存当前活动页面
-	m.activePage = page
+	// 保存当前活动页面到指定实例
+	if err := m.setInstanceActivePage(instanceID, page); err != nil {
+		logger.Warn(ctx, "Failed to set active page: %v", err)
+	}
 
 	logger.Info(ctx, fmt.Sprintf("Page opened: %s", url))
 	return nil
@@ -674,7 +697,9 @@ func (m *Manager) GetCurrentPageCookies() (interface{}, error) {
 }
 
 // StartRecording 开始录制操作
-func (m *Manager) StartRecording(ctx context.Context) error {
+// StartRecording 开始录制操作
+// instanceID: 指定实例ID，空字符串表示使用当前实例
+func (m *Manager) StartRecording(ctx context.Context, instanceID string) error {
 	m.mu.Lock()
 	currentLang := m.currentLanguage
 	if currentLang == "" {
@@ -685,27 +710,29 @@ func (m *Manager) StartRecording(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if !m.isRunning || m.browser == nil {
-		return fmt.Errorf("browser is not running")
+	// 获取指定实例的浏览器和活动页面
+	_, activePage, _, err := m.getInstanceBrowser(instanceID)
+	if err != nil {
+		return err
 	}
 
-	if m.activePage == nil {
+	if activePage == nil {
 		return fmt.Errorf("please open a page first")
 	}
 
 	// 获取当前页面URL
-	info, err := m.activePage.Info()
+	info, err := activePage.Info()
 	if err != nil {
 		return fmt.Errorf("failed to get page info: %w", err)
 	}
 
-	err = m.recorder.StartRecording(ctx, m.activePage, info.URL, currentLang)
+	err = m.recorder.StartRecording(ctx, activePage, info.URL, currentLang)
 	if err != nil {
 		return err
 	}
 
 	// 启动录制后,显示录制UI面板
-	_, _ = m.activePage.Eval(`() => {
+	_, _ = activePage.Eval(`() => {
 		window.__isRecordingActive__ = true;
 		if (typeof createRecorderUI === 'function') createRecorderUI();
 		if (typeof createHighlightElement === 'function') createHighlightElement();
@@ -768,20 +795,37 @@ func (m *Manager) ClearInPageRecordingState() {
 }
 
 // PlayScript 回放脚本
-func (m *Manager) PlayScript(ctx context.Context, script *models.Script) (*models.PlayResult, *rod.Page, error) {
-	if !m.isRunning || m.browser == nil {
-		return nil, nil, fmt.Errorf("browser is not running")
+// instanceID: 指定实例ID，空字符串表示使用当前实例
+func (m *Manager) PlayScript(ctx context.Context, script *models.Script, instanceID string) (*models.PlayResult, *rod.Page, error) {
+	// 获取指定实例的浏览器
+	browser, _, instance, err := m.getInstanceBrowser(instanceID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// 确定使用的实例ID
+	usedInstanceID := instanceID
+	if usedInstanceID == "" {
+		usedInstanceID = m.currentInstanceID
+	}
+
+	// 获取实例名称
+	instanceName := ""
+	if instance != nil {
+		instanceName = instance.Name
 	}
 
 	// 创建执行记录
 	executionID := fmt.Sprintf("%s-%d", script.ID, time.Now().UnixNano())
 	execution := &models.ScriptExecution{
-		ID:         executionID,
-		ScriptID:   script.ID,
-		ScriptName: script.Name,
-		StartTime:  time.Now(),
-		TotalSteps: len(script.Actions),
-		CreatedAt:  time.Now(),
+		ID:           executionID,
+		ScriptID:     script.ID,
+		ScriptName:   script.Name,
+		InstanceID:   usedInstanceID,
+		InstanceName: instanceName,
+		StartTime:    time.Now(),
+		TotalSteps:   len(script.Actions),
+		CreatedAt:    time.Now(),
 	}
 
 	// 根据脚本的URL匹配配置
@@ -804,10 +848,10 @@ func (m *Manager) PlayScript(ctx context.Context, script *models.Script) (*model
 	}
 
 	if useStealth {
-		page = stealth.MustPage(m.browser)
+		page = stealth.MustPage(browser)
 		logger.Info(ctx, "Replay using Stealth mode")
 	} else {
-		page = m.browser.MustPage()
+		page = browser.MustPage()
 		logger.Info(ctx, "Replay not using Stealth mode")
 	}
 
@@ -831,7 +875,7 @@ func (m *Manager) PlayScript(ctx context.Context, script *models.Script) (*model
 				proto.BrowserPermissionTypeClipboardSanitizedWrite,
 			},
 		}
-		if err := grantPlayPermissions.Call(m.browser); err != nil {
+		if err := grantPlayPermissions.Call(browser); err != nil {
 			logger.Warn(ctx, "Failed to grant clipboard permissions for playback: %v", err)
 		} else {
 			logger.Info(ctx, "✓ Clipboard permissions granted for playback")
@@ -848,7 +892,7 @@ func (m *Manager) PlayScript(ctx context.Context, script *models.Script) (*model
 	// 设置下载路径并启动下载监听
 	if m.downloadPath != "" {
 		player.SetDownloadPath(m.downloadPath)
-		player.StartDownloadListener(ctx, m.browser)
+		player.StartDownloadListener(ctx, browser)
 		logger.Info(ctx, "Download tracking enabled for playback, path: %s", m.downloadPath)
 	}
 
@@ -1158,4 +1202,382 @@ func (m *Manager) getDefaultBrowserConfig() *models.BrowserConfig {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
+}
+
+// ==================== 多实例管理 ====================
+
+// getInstanceBrowser 获取指定实例的浏览器和活动页面
+// 如果 instanceID 为空，则使用当前实例
+// 返回: browser, activePage, instance, error
+func (m *Manager) getInstanceBrowser(instanceID string) (*rod.Browser, *rod.Page, *models.BrowserInstance, error) {
+	// 如果没有指定实例ID，使用当前实例
+	if instanceID == "" {
+		instanceID = m.currentInstanceID
+	}
+
+	// 如果还是空，说明没有运行中的实例
+	if instanceID == "" {
+		// 向后兼容：检查旧的 browser 字段
+		if m.isRunning && m.browser != nil {
+			return m.browser, m.activePage, nil, nil
+		}
+		return nil, nil, nil, fmt.Errorf("no running instance available")
+	}
+
+	// 获取实例运行时信息
+	runtime, exists := m.instances[instanceID]
+	if !exists || runtime == nil {
+		return nil, nil, nil, fmt.Errorf("instance %s is not running", instanceID)
+	}
+
+	return runtime.browser, runtime.activePage, runtime.instance, nil
+}
+
+// setInstanceActivePage 设置指定实例的活动页面
+func (m *Manager) setInstanceActivePage(instanceID string, page *rod.Page) error {
+	// 如果没有指定实例ID，使用当前实例
+	if instanceID == "" {
+		instanceID = m.currentInstanceID
+	}
+
+	// 如果还是空，说明没有运行中的实例
+	if instanceID == "" {
+		// 向后兼容：设置旧的 activePage 字段
+		if m.isRunning && m.browser != nil {
+			m.activePage = page
+			return nil
+		}
+		return fmt.Errorf("no running instance available")
+	}
+
+	// 获取实例运行时信息
+	runtime, exists := m.instances[instanceID]
+	if !exists || runtime == nil {
+		return fmt.Errorf("instance %s is not running", instanceID)
+	}
+
+	runtime.activePage = page
+
+	// 如果是当前实例，也更新向后兼容的字段
+	if instanceID == m.currentInstanceID {
+		m.activePage = page
+	}
+
+	return nil
+}
+
+// StartInstance 启动指定浏览器实例
+func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 检查实例是否已启动
+	if runtime, exists := m.instances[instanceID]; exists && runtime != nil {
+		return fmt.Errorf("instance %s is already running", instanceID)
+	}
+
+	// 从数据库加载实例配置
+	instance, err := m.db.GetBrowserInstance(instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to load instance: %w", err)
+	}
+
+	logger.Info(ctx, "Starting browser instance: %s (%s)", instance.Name, instance.Type)
+
+	var browser *rod.Browser
+	var launcherObj *launcher.Launcher
+	var url string
+
+	if instance.Type == "remote" {
+		// 远程模式
+		if instance.ControlURL == "" {
+			return fmt.Errorf("control_url is required for remote instance")
+		}
+		url = instance.ControlURL
+		logger.Info(ctx, "Connecting to remote browser: %s", url)
+		browser = rod.New().ControlURL(url)
+	} else {
+		// 本地模式
+		logger.Info(ctx, "Starting local browser instance...")
+
+		// 创建启动器
+		headless := false
+		if instance.Headless != nil {
+			headless = *instance.Headless
+		}
+
+		l := launcher.New().
+			Headless(headless).
+			Devtools(false).
+			Leakless(false)
+
+		// 设置代理
+		if instance.Proxy != "" {
+			l = l.Proxy(instance.Proxy)
+			logger.Info(ctx, "Using proxy: %s", instance.Proxy)
+		}
+
+		// 设置启动参数
+		launchArgs := instance.LaunchArgs
+		if len(launchArgs) == 0 {
+			// 使用默认启动参数
+			launchArgs = []string{
+				"disable-blink-features=AutomationControlled",
+				"excludeSwitches=enable-automation",
+				"no-first-run",
+				"no-default-browser-check",
+				"window-size=1920,1080",
+				"start-maximized",
+			}
+		}
+
+		for _, arg := range launchArgs {
+			arg = strings.TrimPrefix(arg, "--")
+			if strings.Contains(arg, "=") {
+				parts := strings.SplitN(arg, "=", 2)
+				l = l.Set(flags.Flag(parts[0]), parts[1])
+			} else {
+				l = l.Set(flags.Flag(arg))
+			}
+		}
+
+		// 设置浏览器路径
+		if instance.BinPath != "" {
+			l = l.Bin(instance.BinPath)
+			logger.Info(ctx, "Using browser path: %s", instance.BinPath)
+		}
+
+		// 设置用户数据目录
+		if instance.UserDataDir != "" {
+			if err := os.MkdirAll(instance.UserDataDir, 0o755); err != nil {
+				logger.Warn(ctx, "Failed to create user data directory: %v", err)
+			} else {
+				l = l.UserDataDir(instance.UserDataDir)
+				logger.Info(ctx, "Using user data directory: %s", instance.UserDataDir)
+			}
+		}
+
+		// 启动浏览器
+		url, err = l.Launch()
+		if err != nil {
+			return fmt.Errorf("failed to launch browser: %w", err)
+		}
+
+		browser = rod.New().ControlURL(url)
+		launcherObj = l
+		logger.Info(ctx, "Browser launched: %s", url)
+	}
+
+	// 连接浏览器
+	if err := browser.Connect(); err != nil {
+		if launcherObj != nil {
+			launcherObj.Kill()
+		}
+		return fmt.Errorf("failed to connect browser: %w", err)
+	}
+
+	// 设置下载行为
+	if m.downloadPath == "" {
+		downloadPath := "./downloads"
+		absDownloadPath, err := os.Getwd()
+		if err == nil {
+			downloadPath = absDownloadPath + "/downloads"
+		}
+		os.MkdirAll(downloadPath, 0o755)
+		m.downloadPath = downloadPath
+		m.recorder.SetDownloadPath(downloadPath)
+	}
+
+	downloadBehavior := &proto.BrowserSetDownloadBehavior{
+		Behavior:      proto.BrowserSetDownloadBehaviorBehaviorAllow,
+		DownloadPath:  m.downloadPath,
+		EventsEnabled: true,
+	}
+	if err := downloadBehavior.Call(browser); err != nil {
+		logger.Warn(ctx, "Failed to set download behavior: %v", err)
+	}
+
+	// 授予剪贴板权限
+	grantPermissions := &proto.BrowserGrantPermissions{
+		Permissions: []proto.BrowserPermissionType{
+			proto.BrowserPermissionTypeClipboardReadWrite,
+			proto.BrowserPermissionTypeClipboardSanitizedWrite,
+		},
+	}
+	if err := grantPermissions.Call(browser); err != nil {
+		logger.Warn(ctx, "Failed to grant clipboard permissions: %v", err)
+	}
+
+	// 创建运行时信息
+	runtime := &BrowserInstanceRuntime{
+		instance:  instance,
+		browser:   browser,
+		launcher:  launcherObj,
+		startTime: time.Now(),
+	}
+
+	m.instances[instanceID] = runtime
+
+	// 更新实例状态为运行中
+	instance.IsActive = true
+	instance.UpdatedAt = time.Now()
+	if err := m.db.SaveBrowserInstance(instance); err != nil {
+		logger.Warn(ctx, "Failed to update instance status: %v", err)
+	}
+
+	// 如果是第一个启动的实例或者是默认实例，设置为当前实例
+	if m.currentInstanceID == "" || instance.IsDefault {
+		m.currentInstanceID = instanceID
+
+		// 向后兼容：更新旧字段
+		m.browser = browser
+		m.launcher = launcherObj
+		m.isRunning = true
+		m.startTime = runtime.startTime
+	}
+
+	logger.Info(ctx, "✓ Browser instance started: %s", instance.Name)
+	return nil
+}
+
+// StopInstance 停止指定浏览器实例
+func (m *Manager) StopInstance(ctx context.Context, instanceID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	runtime, exists := m.instances[instanceID]
+	if !exists || runtime == nil {
+		return fmt.Errorf("instance %s is not running", instanceID)
+	}
+
+	logger.Info(ctx, "Stopping browser instance: %s", runtime.instance.Name)
+
+	isRemote := runtime.instance.Type == "remote"
+
+	// 关闭浏览器
+	if runtime.browser != nil {
+		if !isRemote {
+			// 关闭所有页面
+			if pages, err := runtime.browser.Pages(); err == nil {
+				for _, page := range pages {
+					_ = page.Close()
+				}
+			}
+			time.Sleep(1 * time.Second)
+		}
+
+		if err := runtime.browser.Close(); err != nil {
+			logger.Warn(ctx, "Error closing browser: %v", err)
+		}
+	}
+
+	// 终止本地浏览器进程
+	if !isRemote && runtime.launcher != nil {
+		time.Sleep(1 * time.Second)
+		runtime.launcher.Kill()
+		logger.Info(ctx, "Browser process terminated")
+	}
+
+	// 更新实例状态
+	runtime.instance.IsActive = false
+	runtime.instance.UpdatedAt = time.Now()
+	if err := m.db.SaveBrowserInstance(runtime.instance); err != nil {
+		logger.Warn(ctx, "Failed to update instance status: %v", err)
+	}
+
+	// 删除运行时信息
+	delete(m.instances, instanceID)
+
+	// 如果停止的是当前实例，清空当前实例 ID
+	if m.currentInstanceID == instanceID {
+		m.currentInstanceID = ""
+
+		// 向后兼容：清空旧字段
+		m.browser = nil
+		m.launcher = nil
+		m.isRunning = false
+		m.activePage = nil
+
+		// 尝试切换到第一个运行中的实例
+		for id := range m.instances {
+			m.currentInstanceID = id
+			runtime := m.instances[id]
+			m.browser = runtime.browser
+			m.launcher = runtime.launcher
+			m.isRunning = true
+			m.startTime = runtime.startTime
+			break
+		}
+	}
+
+	logger.Info(ctx, "✓ Browser instance stopped: %s", runtime.instance.Name)
+	return nil
+}
+
+// SwitchInstance 切换当前活动实例
+func (m *Manager) SwitchInstance(ctx context.Context, instanceID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	runtime, exists := m.instances[instanceID]
+	if !exists || runtime == nil {
+		return fmt.Errorf("instance %s is not running", instanceID)
+	}
+
+	m.currentInstanceID = instanceID
+
+	// 向后兼容：更新旧字段
+	m.browser = runtime.browser
+	m.launcher = runtime.launcher
+	m.isRunning = true
+	m.startTime = runtime.startTime
+	m.activePage = runtime.activePage
+
+	logger.Info(ctx, "Switched to instance: %s", runtime.instance.Name)
+	return nil
+}
+
+// GetCurrentInstance 获取当前活动实例
+func (m *Manager) GetCurrentInstance() *models.BrowserInstance {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.currentInstanceID == "" {
+		return nil
+	}
+
+	runtime, exists := m.instances[m.currentInstanceID]
+	if !exists || runtime == nil {
+		return nil
+	}
+
+	return runtime.instance
+}
+
+// GetInstanceRuntime 获取指定实例的运行时信息
+func (m *Manager) GetInstanceRuntime(instanceID string) (*BrowserInstanceRuntime, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	runtime, exists := m.instances[instanceID]
+	if !exists || runtime == nil {
+		return nil, fmt.Errorf("instance %s is not running", instanceID)
+	}
+
+	return runtime, nil
+}
+
+// ListRunningInstances 列出所有运行中的实例
+func (m *Manager) ListRunningInstances() []*models.BrowserInstance {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var instances []*models.BrowserInstance
+	for _, runtime := range m.instances {
+		if runtime != nil && runtime.instance != nil {
+			instances = append(instances, runtime.instance)
+		}
+	}
+
+	return instances
 }

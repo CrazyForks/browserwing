@@ -12,20 +12,21 @@ import (
 )
 
 var (
-	articlesBucket         = []byte("articles")
-	promptsBucket          = []byte("prompts")
-	cookiesBucket          = []byte("cookies")
-	scriptsBucket          = []byte("scripts")
-	llmConfigsBucket       = []byte("llm_configs")
-	browserConfigsBucket   = []byte("browser_configs")
-	scriptExecutionsBucket = []byte("script_executions")
-	recordingConfigsBucket = []byte("recording_configs")
-	agentSessionsBucket    = []byte("agent_sessions")
-	agentMessagesBucket    = []byte("agent_messages")
-	toolConfigsBucket      = []byte("tool_configs")
-	mcpServicesBucket      = []byte("mcp_services")
-	usersBucket            = []byte("users")
-	apiKeysBucket          = []byte("api_keys")
+	articlesBucket          = []byte("articles")
+	promptsBucket           = []byte("prompts")
+	cookiesBucket           = []byte("cookies")
+	scriptsBucket           = []byte("scripts")
+	llmConfigsBucket        = []byte("llm_configs")
+	browserConfigsBucket    = []byte("browser_configs")
+	browserInstancesBucket  = []byte("browser_instances")
+	scriptExecutionsBucket  = []byte("script_executions")
+	recordingConfigsBucket  = []byte("recording_configs")
+	agentSessionsBucket     = []byte("agent_sessions")
+	agentMessagesBucket     = []byte("agent_messages")
+	toolConfigsBucket       = []byte("tool_configs")
+	mcpServicesBucket       = []byte("mcp_services")
+	usersBucket             = []byte("users")
+	apiKeysBucket           = []byte("api_keys")
 )
 
 type BoltDB struct {
@@ -62,6 +63,10 @@ func NewBoltDB(dbPath string) (*BoltDB, error) {
 			return err
 		}
 		_, err = tx.CreateBucketIfNotExists(browserConfigsBucket)
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists(browserInstancesBucket)
 		if err != nil {
 			return err
 		}
@@ -1330,6 +1335,167 @@ func (b *BoltDB) UpdateApiKey(apiKey *models.ApiKey) error {
 func (b *BoltDB) DeleteApiKey(id string) error {
 	return b.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(apiKeysBucket)
+		return bucket.Delete([]byte(id))
+	})
+}
+
+// ==================== 浏览器实例管理 ====================
+
+// SaveBrowserInstance 保存浏览器实例
+func (b *BoltDB) SaveBrowserInstance(instance *models.BrowserInstance) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(browserInstancesBucket)
+		
+		// 如果设置为默认实例，需要先取消其他实例的默认状态
+		if instance.IsDefault {
+			cursor := bucket.Cursor()
+			for k, v := cursor.First(); k != nil; k, v = cursor.Next() {
+				var existingInstance models.BrowserInstance
+				if err := json.Unmarshal(v, &existingInstance); err != nil {
+					continue
+				}
+				if existingInstance.ID != instance.ID && existingInstance.IsDefault {
+					existingInstance.IsDefault = false
+					existingInstance.UpdatedAt = time.Now()
+					data, _ := json.Marshal(existingInstance)
+					bucket.Put([]byte(existingInstance.ID), data)
+				}
+			}
+		}
+		
+		data, err := json.Marshal(instance)
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(instance.ID), data)
+	})
+}
+
+// GetBrowserInstance 获取浏览器实例
+func (b *BoltDB) GetBrowserInstance(id string) (*models.BrowserInstance, error) {
+	var instance models.BrowserInstance
+	err := b.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(browserInstancesBucket)
+		data := bucket.Get([]byte(id))
+		if data == nil {
+			return fmt.Errorf("browser instance not found")
+		}
+		return json.Unmarshal(data, &instance)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &instance, nil
+}
+
+// ListBrowserInstances 列出所有浏览器实例
+func (b *BoltDB) ListBrowserInstances() ([]models.BrowserInstance, error) {
+	var instances []models.BrowserInstance
+	err := b.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(browserInstancesBucket)
+		return bucket.ForEach(func(k, v []byte) error {
+			var instance models.BrowserInstance
+			if err := json.Unmarshal(v, &instance); err != nil {
+				return err
+			}
+			instances = append(instances, instance)
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	
+	// 按创建时间排序（默认实例排在前面）
+	sort.Slice(instances, func(i, j int) bool {
+		if instances[i].IsDefault != instances[j].IsDefault {
+			return instances[i].IsDefault
+		}
+		return instances[i].CreatedAt.Before(instances[j].CreatedAt)
+	})
+	
+	return instances, nil
+}
+
+// GetDefaultBrowserInstance 获取默认浏览器实例
+func (b *BoltDB) GetDefaultBrowserInstance() (*models.BrowserInstance, error) {
+	var instance *models.BrowserInstance
+	err := b.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(browserInstancesBucket)
+		return bucket.ForEach(func(k, v []byte) error {
+			var inst models.BrowserInstance
+			if err := json.Unmarshal(v, &inst); err != nil {
+				return err
+			}
+			if inst.IsDefault {
+				instance = &inst
+				return nil
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	if instance == nil {
+		return nil, fmt.Errorf("default browser instance not found")
+	}
+	return instance, nil
+}
+
+// UpdateBrowserInstance 更新浏览器实例
+func (b *BoltDB) UpdateBrowserInstance(id string, instance *models.BrowserInstance) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(browserInstancesBucket)
+		
+		// 检查实例是否存在
+		data := bucket.Get([]byte(id))
+		if data == nil {
+			return fmt.Errorf("browser instance not found")
+		}
+		
+		// 如果设置为默认实例，需要先取消其他实例的默认状态
+		if instance.IsDefault {
+			cursor := bucket.Cursor()
+			for k, v := cursor.First(); k != nil; k, v = cursor.Next() {
+				var existingInstance models.BrowserInstance
+				if err := json.Unmarshal(v, &existingInstance); err != nil {
+					continue
+				}
+				if existingInstance.ID != id && existingInstance.IsDefault {
+					existingInstance.IsDefault = false
+					existingInstance.UpdatedAt = time.Now()
+					updatedData, _ := json.Marshal(existingInstance)
+					bucket.Put([]byte(existingInstance.ID), updatedData)
+				}
+			}
+		}
+		
+		instance.UpdatedAt = time.Now()
+		newData, err := json.Marshal(instance)
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(id), newData)
+	})
+}
+
+// DeleteBrowserInstance 删除浏览器实例
+func (b *BoltDB) DeleteBrowserInstance(id string) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(browserInstancesBucket)
+		
+		// 检查是否为默认实例
+		data := bucket.Get([]byte(id))
+		if data != nil {
+			var instance models.BrowserInstance
+			if err := json.Unmarshal(data, &instance); err == nil {
+				if instance.IsDefault {
+					return fmt.Errorf("cannot delete default browser instance")
+				}
+			}
+		}
+		
 		return bucket.Delete([]byte(id))
 	})
 }
