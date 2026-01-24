@@ -3673,6 +3673,201 @@ func (h *Handler) ExecutorHelp(c *gin.Context) {
 			},
 			"returns": "Batch execution results",
 		},
+		{
+			"name":        "tabs",
+			"method":      "POST",
+			"endpoint":    "/api/v1/executor/tabs",
+			"description": "Manage browser tabs (list, create, switch, close)",
+			"parameters": map[string]interface{}{
+				"action": map[string]interface{}{
+					"type":        "string",
+					"required":    true,
+					"description": "Tab action: list, new, switch, close",
+					"example":     "list",
+				},
+				"url": map[string]interface{}{
+					"type":        "string",
+					"required":    false,
+					"description": "URL for new tab (required when action='new')",
+					"example":     "https://example.com",
+				},
+				"index": map[string]interface{}{
+					"type":        "number",
+					"required":    false,
+					"description": "Tab index for switch/close (0-based)",
+					"example":     1,
+				},
+			},
+			"example": map[string]interface{}{
+				"action": "list",
+			},
+			"returns": "Tab operation result with tab information",
+		},
+		{
+			"name":        "fill-form",
+			"method":      "POST",
+			"endpoint":    "/api/v1/executor/fill-form",
+			"description": "Intelligently fill out web forms with multiple fields",
+			"parameters": map[string]interface{}{
+				"fields": map[string]interface{}{
+					"type":        "array",
+					"required":    true,
+					"description": "Array of form fields to fill",
+					"example": []map[string]interface{}{
+						{"name": "username", "value": "john@example.com"},
+						{"name": "password", "value": "secret123"},
+					},
+				},
+				"submit": map[string]interface{}{
+					"type":        "boolean",
+					"required":    false,
+					"description": "Auto-submit form after filling",
+					"default":     false,
+				},
+				"timeout": map[string]interface{}{
+					"type":        "number",
+					"required":    false,
+					"description": "Timeout per field in seconds",
+					"default":     10,
+				},
+			},
+			"example": map[string]interface{}{
+				"fields": []map[string]interface{}{
+					{"name": "email", "value": "user@example.com"},
+					{"name": "password", "value": "secret123"},
+				},
+				"submit": true,
+			},
+			"returns": "Form fill results with success/error details",
+		},
+		{
+			"name":        "resize",
+			"method":      "POST",
+			"endpoint":    "/api/v1/executor/resize",
+			"description": "Resize the browser window",
+			"parameters": map[string]interface{}{
+				"width": map[string]interface{}{
+					"type":        "number",
+					"required":    true,
+					"description": "Window width in pixels",
+					"example":     1920,
+				},
+				"height": map[string]interface{}{
+					"type":        "number",
+					"required":    true,
+					"description": "Window height in pixels",
+					"example":     1080,
+				},
+			},
+			"example": map[string]interface{}{
+				"width":  1920,
+				"height": 1080,
+			},
+			"returns": "Operation result",
+		},
+		{
+			"name":        "console-messages",
+			"method":      "GET",
+			"endpoint":    "/api/v1/executor/console-messages",
+			"description": "Get console messages from the browser (logs, warnings, errors)",
+			"parameters":  map[string]interface{}{},
+			"returns":     "Array of console messages with type, text, and timestamp",
+			"note":        "Useful for debugging JavaScript errors or monitoring console output",
+		},
+		{
+			"name":        "network-requests",
+			"method":      "GET",
+			"endpoint":    "/api/v1/executor/network-requests",
+			"description": "Get network requests made by the page (XHR, Fetch, etc.)",
+			"parameters":  map[string]interface{}{},
+			"returns":     "Array of network requests with URL, method, status, and response",
+			"note":        "Useful for API monitoring and debugging network issues",
+		},
+		{
+			"name":        "handle-dialog",
+			"method":      "POST",
+			"endpoint":    "/api/v1/executor/handle-dialog",
+			"description": "Configure how to handle JavaScript dialogs (alert, confirm, prompt)",
+			"parameters": map[string]interface{}{
+				"accept": map[string]interface{}{
+					"type":        "boolean",
+					"required":    true,
+					"description": "Whether to accept the dialog (true) or dismiss it (false)",
+					"example":     true,
+				},
+				"text": map[string]interface{}{
+					"type":        "string",
+					"required":    false,
+					"description": "Text to enter for prompt dialogs",
+					"example":     "User input text",
+				},
+			},
+			"example": map[string]interface{}{
+				"accept": true,
+				"text":   "Hello",
+			},
+			"returns": "Operation result",
+			"note":    "Must be called before the dialog appears. Affects next dialog interaction.",
+		},
+		{
+			"name":        "file-upload",
+			"method":      "POST",
+			"endpoint":    "/api/v1/executor/file-upload",
+			"description": "Upload files to a file input element",
+			"parameters": map[string]interface{}{
+				"identifier": map[string]interface{}{
+					"type":        "string",
+					"required":    true,
+					"description": "File input element identifier",
+					"example":     "#file-input",
+				},
+				"file_paths": map[string]interface{}{
+					"type":        "array",
+					"required":    true,
+					"description": "Array of file paths to upload (absolute paths)",
+					"example":     []string{"/path/to/file1.pdf", "/path/to/file2.jpg"},
+				},
+			},
+			"example": map[string]interface{}{
+				"identifier": "#file-input",
+				"file_paths": []string{"/path/to/document.pdf"},
+			},
+			"returns": "Operation result",
+		},
+		{
+			"name":        "drag",
+			"method":      "POST",
+			"endpoint":    "/api/v1/executor/drag",
+			"description": "Drag an element to another element (drag and drop)",
+			"parameters": map[string]interface{}{
+				"from_identifier": map[string]interface{}{
+					"type":        "string",
+					"required":    true,
+					"description": "Source element identifier to drag",
+					"example":     "#drag-item",
+				},
+				"to_identifier": map[string]interface{}{
+					"type":        "string",
+					"required":    true,
+					"description": "Target element identifier to drop onto",
+					"example":     "#drop-zone",
+				},
+			},
+			"example": map[string]interface{}{
+				"from_identifier": "#drag-item",
+				"to_identifier":   "#drop-zone",
+			},
+			"returns": "Operation result",
+		},
+		{
+			"name":        "close-page",
+			"method":      "POST",
+			"endpoint":    "/api/v1/executor/close-page",
+			"description": "Close the current browser page/tab",
+			"parameters":  map[string]interface{}{},
+			"returns":     "Operation result",
+			"note":        "Use with caution. After closing, you may need to switch to another tab.",
+		},
 	}
 
 	// 如果指定了特定命令，只返回该命令的信息
@@ -4455,6 +4650,126 @@ func (h *Handler) ExecutorFillForm(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// ExecutorConsoleMessages 获取控制台消息
+func (h *Handler) ExecutorConsoleMessages(c *gin.Context) {
+	executor := h.executor.WithContext(c.Request.Context())
+	result, err := executor.GetConsoleMessages(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  "error.getConsoleMessagesFailed",
+			"detail": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// ExecutorNetworkRequests 获取网络请求
+func (h *Handler) ExecutorNetworkRequests(c *gin.Context) {
+	executor := h.executor.WithContext(c.Request.Context())
+	result, err := executor.GetNetworkRequests(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  "error.getNetworkRequestsFailed",
+			"detail": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// ExecutorHandleDialog 处理对话框
+func (h *Handler) ExecutorHandleDialog(c *gin.Context) {
+	var req struct {
+		Accept bool   `json:"accept" binding:"required"`
+		Text   string `json:"text"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidRequest"})
+		return
+	}
+
+	executor := h.executor.WithContext(c.Request.Context())
+	result, err := executor.HandleDialog(c.Request.Context(), req.Accept, req.Text)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  "error.handleDialogFailed",
+			"detail": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// ExecutorFileUpload 文件上传
+func (h *Handler) ExecutorFileUpload(c *gin.Context) {
+	var req struct {
+		Identifier string   `json:"identifier" binding:"required"`
+		FilePaths  []string `json:"file_paths" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidRequest"})
+		return
+	}
+
+	executor := h.executor.WithContext(c.Request.Context())
+	result, err := executor.FileUpload(c.Request.Context(), req.Identifier, req.FilePaths)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  "error.fileUploadFailed",
+			"detail": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// ExecutorDrag 拖拽元素
+func (h *Handler) ExecutorDrag(c *gin.Context) {
+	var req struct {
+		FromIdentifier string `json:"from_identifier" binding:"required"`
+		ToIdentifier   string `json:"to_identifier" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidRequest"})
+		return
+	}
+
+	executor := h.executor.WithContext(c.Request.Context())
+	result, err := executor.Drag(c.Request.Context(), req.FromIdentifier, req.ToIdentifier)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  "error.dragFailed",
+			"detail": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// ExecutorClosePage 关闭当前页面
+func (h *Handler) ExecutorClosePage(c *gin.Context) {
+	executor := h.executor.WithContext(c.Request.Context())
+	result, err := executor.ClosePage(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  "error.closePageFailed",
+			"detail": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
 // ExportExecutorSkill 导出 Executor API 为 Claude Skills 的 SKILL.md 格式
 func (h *Handler) ExportExecutorSkill(c *gin.Context) {
 	// 获取服务端地址
@@ -4707,7 +5022,18 @@ func generateExecutorSkillMD(host string) string {
 	sb.WriteString("- `POST /evaluate` - Execute JavaScript code\n")
 	sb.WriteString("- `POST /batch` - Execute multiple operations in sequence\n")
 	sb.WriteString("- `POST /scroll-to-bottom` - Scroll to page bottom\n")
-	sb.WriteString("- `POST /resize` - Resize browser window\n\n")
+	sb.WriteString("- `POST /resize` - Resize browser window\n")
+	sb.WriteString("- `POST /tabs` - Manage browser tabs (list, new, switch, close)\n")
+	sb.WriteString("- `POST /fill-form` - Intelligently fill multiple form fields at once\n\n")
+
+	// 调试和监控类
+	sb.WriteString("### Debug & Monitoring\n")
+	sb.WriteString("- `GET /console-messages` - Get browser console messages (logs, warnings, errors)\n")
+	sb.WriteString("- `GET /network-requests` - Get network requests made by the page\n")
+	sb.WriteString("- `POST /handle-dialog` - Configure JavaScript dialog (alert, confirm, prompt) handling\n")
+	sb.WriteString("- `POST /file-upload` - Upload files to input elements\n")
+	sb.WriteString("- `POST /drag` - Drag and drop elements\n")
+	sb.WriteString("- `POST /close-page` - Close the current page/tab\n\n")
 
 	// 元素定位方式
 	sb.WriteString("## Element Identification\n\n")

@@ -263,6 +263,14 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 			// 标签页管理和表单填写
 			executorAPI.POST("/tabs", handler.ExecutorTabs)           // 标签页管理（list, new, switch, close）
 			executorAPI.POST("/fill-form", handler.ExecutorFillForm) // 批量填写表单
+
+			// 调试和监控
+			executorAPI.GET("/console-messages", handler.ExecutorConsoleMessages)     // 获取控制台消息
+			executorAPI.GET("/network-requests", handler.ExecutorNetworkRequests)     // 获取网络请求
+			executorAPI.POST("/handle-dialog", handler.ExecutorHandleDialog)          // 处理JavaScript对话框
+			executorAPI.POST("/file-upload", handler.ExecutorFileUpload)              // 文件上传
+			executorAPI.POST("/drag", handler.ExecutorDrag)                           // 拖拽元素
+			executorAPI.POST("/close-page", handler.ExecutorClosePage)                // 关闭当前页面
 		}
 
 		// Agent 聊天相关
