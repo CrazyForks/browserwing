@@ -375,10 +375,6 @@ func (am *AgentManager) initMCPTools() error {
 		count++
 	}
 
-	if count == 0 {
-		logger.Warn(am.ctx, "⚠ No MCP command scripts found, please create and enable MCP commands in Script Management page")
-	}
-
 	return nil
 }
 

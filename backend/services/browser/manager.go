@@ -3,7 +3,10 @@ package browser
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"regexp"
 	"runtime"
@@ -25,6 +28,42 @@ import (
 
 //go:embed scripts/float_button.js
 var floatButtonScript string
+
+// resolveWebSocketURL 从 HTTP control URL 解析 WebSocket URL
+// 如果输入已经是 ws:// 或 wss:// URL，则直接返回
+// 如果是 http:// 或 https:// URL，则查询 /json/version 获取 webSocketDebuggerUrl
+func resolveWebSocketURL(controlURL string) (string, error) {
+	// 如果已经是 WebSocket URL，直接返回
+	if strings.HasPrefix(controlURL, "ws://") || strings.HasPrefix(controlURL, "wss://") {
+		return controlURL, nil
+	}
+
+	// HTTP URL，需要查询 /json/version
+	versionURL := strings.TrimRight(controlURL, "/") + "/json/version"
+	resp, err := http.Get(versionURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch browser version from %s: %w", versionURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("unexpected status code %d from %s: %s", resp.StatusCode, versionURL, string(body))
+	}
+
+	var result struct {
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode response from %s: %w", versionURL, err)
+	}
+
+	if result.WebSocketDebuggerURL == "" {
+		return "", fmt.Errorf("webSocketDebuggerUrl not found in response from %s", versionURL)
+	}
+
+	return result.WebSocketDebuggerURL, nil
+}
 
 // BrowserInstanceRuntime 浏览器实例运行时信息
 type BrowserInstanceRuntime struct {
@@ -130,13 +169,21 @@ func (m *Manager) Start(ctx context.Context) error {
 	// 检查是否配置了远程 Chrome URL
 	if m.config.Browser != nil && m.config.Browser.ControlURL != "" {
 		// 使用远程 Chrome
-		url = m.config.Browser.ControlURL
+		controlURL := m.config.Browser.ControlURL
 		logger.Info(ctx, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 		logger.Info(ctx, "Using remote Chrome browser")
-		logger.Info(ctx, fmt.Sprintf("Control URL: %s", url))
+		logger.Info(ctx, fmt.Sprintf("Control URL: %s", controlURL))
 		logger.Info(ctx, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-		// 直接连接到远程浏览器
+		// 解析 WebSocket URL
+		wsURL, err := resolveWebSocketURL(controlURL)
+		if err != nil {
+			return fmt.Errorf("failed to resolve WebSocket URL from %s: %w", controlURL, err)
+		}
+		logger.Info(ctx, fmt.Sprintf("Resolved WebSocket URL: %s", wsURL))
+		url = wsURL
+
+		// 连接到远程浏览器
 		browser = rod.New().ControlURL(url)
 	} else {
 		// 启动本地浏览器
@@ -423,12 +470,12 @@ func (m *Manager) Stop() error {
 func (m *Manager) IsRunning() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// 检查是否有当前实例ID
 	if m.currentInstanceID == "" {
 		return m.isRunning // 向后兼容：如果没有实例ID，使用旧逻辑
 	}
-	
+
 	// 检查当前实例是否真的在运行
 	runtime, exists := m.instances[m.currentInstanceID]
 	return exists && runtime != nil && runtime.browser != nil
@@ -683,7 +730,7 @@ func (m *Manager) getConfigForURL(url string) *models.BrowserConfig {
 
 	// 没有匹配的，返回默认配置
 	logger.Info(ctx, "No matching site configuration found, using default configuration")
-	
+
 	// 如果默认配置未初始化，尝试加载或创建一个
 	if m.defaultBrowserConfig == nil {
 		logger.Info(ctx, "Default configuration not initialized, loading from database")
@@ -693,7 +740,7 @@ func (m *Manager) getConfigForURL(url string) *models.BrowserConfig {
 			defaultConfig = m.getDefaultBrowserConfig()
 		}
 		m.defaultBrowserConfig = defaultConfig
-		
+
 		// 同时加载网站特定配置
 		allConfigs, err := m.db.ListBrowserConfigs()
 		if err != nil {
@@ -709,7 +756,7 @@ func (m *Manager) getConfigForURL(url string) *models.BrowserConfig {
 			logger.Info(ctx, "Loaded %d site-specific configurations", len(m.siteConfigs))
 		}
 	}
-	
+
 	return m.defaultBrowserConfig
 }
 
@@ -1328,8 +1375,17 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 		if instance.ControlURL == "" {
 			return fmt.Errorf("control_url is required for remote instance")
 		}
-		url = instance.ControlURL
-		logger.Info(ctx, "Connecting to remote browser: %s", url)
+		controlURL := instance.ControlURL
+		logger.Info(ctx, "Connecting to remote browser: %s", controlURL)
+
+		// 解析 WebSocket URL
+		wsURL, err := resolveWebSocketURL(controlURL)
+		if err != nil {
+			return fmt.Errorf("failed to resolve WebSocket URL from %s: %w", controlURL, err)
+		}
+		logger.Info(ctx, "Resolved WebSocket URL: %s", wsURL)
+		url = wsURL
+
 		browser = rod.New().ControlURL(url)
 	} else {
 		// 本地模式
@@ -1390,7 +1446,7 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 				"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
 				"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
 			}
-			
+
 			for _, path := range commonPaths {
 				if _, err := os.Stat(path); err == nil {
 					binPath = path
@@ -1398,14 +1454,14 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 					break
 				}
 			}
-			
+
 			// 如果配置文件中有指定路径，优先使用
 			if m.config.Browser != nil && m.config.Browser.BinPath != "" {
 				binPath = m.config.Browser.BinPath
 				logger.Info(ctx, "Using browser path from config: %s", binPath)
 			}
 		}
-		
+
 		if binPath != "" {
 			l = l.Bin(binPath)
 			logger.Info(ctx, "Using browser path: %s", binPath)
@@ -1495,7 +1551,7 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 	if m.currentInstanceID == "" || instance.IsDefault {
 		m.currentInstanceID = instanceID
 	}
-	
+
 	// 如果启动的是当前实例，更新向后兼容的旧字段
 	if m.currentInstanceID == instanceID {
 		m.browser = browser

@@ -34,7 +34,7 @@ read -p "请输入选项 (1-4) [默认: 1]: " choice
 choice=${choice:-1}
 
 CONTAINER_NAME="browserpilot-chrome"
-PORT=9222
+PORT=19222
 
 case $choice in
     1)
@@ -65,7 +65,8 @@ case $choice in
           --remote-debugging-address=0.0.0.0 \
           --remote-debugging-port=9222 \
           --no-first-run \
-          --disable-extensions
+          --disable-extensions \
+          about:blank
         ;;
         
     2)

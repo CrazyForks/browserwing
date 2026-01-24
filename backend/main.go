@@ -285,6 +285,50 @@ func initDefaultBrowserInstance(db *storage.BoltDB, cfg *config.Config) error {
 	defaultInstance, err := db.GetDefaultBrowserInstance()
 	if err == nil && defaultInstance != nil {
 		log.Printf("Default browser instance already exists: %s (ID: %s)", defaultInstance.Name, defaultInstance.ID)
+
+		// 同步配置文件中的浏览器配置到默认实例
+		if cfg.Browser != nil {
+			needUpdate := false
+
+			// 检查并更新 ControlURL
+			if cfg.Browser.ControlURL != "" && defaultInstance.ControlURL != cfg.Browser.ControlURL {
+				log.Printf("Syncing control URL from config: %s -> %s", defaultInstance.ControlURL, cfg.Browser.ControlURL)
+				defaultInstance.ControlURL = cfg.Browser.ControlURL
+				// 如果配置了远程 URL，切换为 remote 类型
+				if defaultInstance.Type != "remote" {
+					defaultInstance.Type = "remote"
+					log.Printf("Switching instance type to remote due to control URL")
+				}
+				needUpdate = true
+			} else if cfg.Browser.ControlURL == "" && defaultInstance.Type == "remote" {
+				// 如果配置中移除了 ControlURL，但实例仍是 remote 类型，切换回 local
+				log.Printf("Control URL removed from config, switching to local mode")
+				defaultInstance.Type = "local"
+				defaultInstance.ControlURL = ""
+				needUpdate = true
+			}
+
+			// 检查并更新 BinPath（仅 local 模式）
+			if defaultInstance.Type == "local" && cfg.Browser.BinPath != "" && defaultInstance.BinPath != cfg.Browser.BinPath {
+				log.Printf("Syncing bin path from config: %s -> %s", defaultInstance.BinPath, cfg.Browser.BinPath)
+				defaultInstance.BinPath = cfg.Browser.BinPath
+				needUpdate = true
+			}
+
+			// 检查并更新 UserDataDir（仅 local 模式）
+			if defaultInstance.Type == "local" && cfg.Browser.UserDataDir != "" && defaultInstance.UserDataDir != cfg.Browser.UserDataDir {
+				log.Printf("Syncing user data dir from config: %s -> %s", defaultInstance.UserDataDir, cfg.Browser.UserDataDir)
+				defaultInstance.UserDataDir = cfg.Browser.UserDataDir
+				needUpdate = true
+			}
+
+			// 如果有配置变化，保存实例
+			if needUpdate {
+				log.Printf("Updating default browser instance with config changes")
+				return db.SaveBrowserInstance(defaultInstance)
+			}
+		}
+
 		return nil
 	}
 
@@ -292,41 +336,10 @@ func initDefaultBrowserInstance(db *storage.BoltDB, cfg *config.Config) error {
 	var binPath string
 	var userDataDir string
 
-	// 获取默认浏览器路径（参考 config.go 的逻辑）
-	commonPaths := []string{
-		"/usr/bin/google-chrome",
-		"/usr/bin/chromium-browser",
-		"/usr/bin/chromium",
-		"/usr/bin/google-chrome-stable",
-		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-		"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-		"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-	}
-
-	for _, path := range commonPaths {
-		if _, err := os.Stat(path); err == nil {
-			binPath = path
-			log.Printf("Found browser at: %s", binPath)
-			break
-		}
-	}
-
-	// 如果配置中有指定路径，优先使用配置的路径
-	if cfg.Browser != nil && cfg.Browser.BinPath != "" {
-		binPath = cfg.Browser.BinPath
-		log.Printf("Using browser path from config: %s", binPath)
-	}
-
-	// 设置默认用户数据目录
-	homeDir, _ := os.UserHomeDir()
-	if homeDir != "" {
-		userDataDir = filepath.Join(homeDir, ".browserwing", "default-profile")
-	}
-
 	// 创建默认实例
 	useStealth := true
 	headless := false
-	
+
 	// 根据环境自动设置 headless
 	display := os.Getenv("DISPLAY")
 	waylandDisplay := os.Getenv("WAYLAND_DISPLAY")
@@ -335,11 +348,52 @@ func initDefaultBrowserInstance(db *storage.BoltDB, cfg *config.Config) error {
 		log.Println("Detected headless environment, enabling headless mode for default instance")
 	}
 
+	browserType := "local"
+	controlURL := ""
+
+	if cfg.Browser.ControlURL != "" {
+		browserType = "remote"
+		controlURL = cfg.Browser.ControlURL
+	} else {
+
+		// 获取默认浏览器路径（参考 config.go 的逻辑）
+		commonPaths := []string{
+			"/usr/bin/google-chrome",
+			"/usr/bin/chromium-browser",
+			"/usr/bin/chromium",
+			"/usr/bin/google-chrome-stable",
+			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+			"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+		}
+
+		for _, path := range commonPaths {
+			if _, err := os.Stat(path); err == nil {
+				binPath = path
+				log.Printf("Found browser at: %s", binPath)
+				break
+			}
+		}
+
+		// 如果配置中有指定路径，优先使用配置的路径
+		if cfg.Browser != nil && cfg.Browser.BinPath != "" {
+			binPath = cfg.Browser.BinPath
+			log.Printf("Using browser path from config: %s", binPath)
+		}
+
+		// 设置默认用户数据目录
+		homeDir, _ := os.UserHomeDir()
+		if homeDir != "" {
+			userDataDir = filepath.Join(homeDir, ".browserwing", "default-profile")
+		}
+	}
+
 	instance := &models.BrowserInstance{
 		ID:          "default",
 		Name:        "默认浏览器",
 		Description: "系统默认浏览器实例",
-		Type:        "local",
+		Type:        browserType,
+		ControlURL:  controlURL,
 		BinPath:     binPath,
 		UserDataDir: userDataDir,
 		UserAgent:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
@@ -364,7 +418,7 @@ func initDefaultBrowserInstance(db *storage.BoltDB, cfg *config.Config) error {
 		return fmt.Errorf("failed to save default browser instance: %w", err)
 	}
 
-	log.Printf("Created default browser instance: %s (BinPath: %s, UserDataDir: %s)", 
+	log.Printf("Created default browser instance: %s (BinPath: %s, UserDataDir: %s)",
 		instance.Name, instance.BinPath, instance.UserDataDir)
 	return nil
 }
@@ -377,9 +431,9 @@ func initDefaultUser(db *storage.BoltDB, cfg *config.Config) error {
 		log.Printf("Warning: Failed to list users: %v", err)
 		return err
 	}
-	
+
 	log.Printf("Current user count: %d", len(users))
-	
+
 	// 如果已有用户，显示现有用户信息（不显示密码）
 	if len(users) > 0 {
 		log.Printf("Existing users:")
@@ -389,7 +443,7 @@ func initDefaultUser(db *storage.BoltDB, cfg *config.Config) error {
 		log.Printf("Default user already exists, skipping creation")
 		return nil
 	}
-	
+
 	// 创建默认用户
 	log.Printf("Creating default user: username=%s, password=%s", cfg.Auth.DefaultUsername, cfg.Auth.DefaultPassword)
 	defaultUser := &models.User{
@@ -399,13 +453,13 @@ func initDefaultUser(db *storage.BoltDB, cfg *config.Config) error {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	
+
 	err = db.CreateUser(defaultUser)
 	if err != nil {
 		log.Printf("Error: Failed to create default user: %v", err)
 		return err
 	}
-	
+
 	log.Printf("✓ Created default user: username=%s, id=%s", defaultUser.Username, defaultUser.ID)
 	return nil
 }

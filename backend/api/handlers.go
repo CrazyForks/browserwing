@@ -3708,12 +3708,12 @@ func (h *Handler) ExecutorHelp(c *gin.Context) {
 			"5. Use /batch for multiple operations",
 		},
 		"element_identifiers": map[string]interface{}{
-			"css_selector":         "#id, .class, button[type='submit']",
-			"xpath":                "//button[@id='login']",
-			"text_content":         "Login, Sign Up (will find button/link with this text)",
+			"css_selector":        "#id, .class, button[type='submit']",
+			"xpath":               "//button[@id='login']",
+			"text_content":        "Login, Sign Up (will find button/link with this text)",
 			"accessibility_index": "[1], Clickable Element [1], Input Element [2]",
-			"aria_label":           "Searches for elements with aria-label attribute",
-			"recommendation":       "Use /snapshot first to get element indices",
+			"aria_label":          "Searches for elements with aria-label attribute",
+			"recommendation":      "Use /snapshot first to get element indices",
 		},
 		"commands": commands,
 		"examples": map[string]interface{}{
@@ -5007,7 +5007,7 @@ func (h *Handler) ListBrowserInstances(c *gin.Context) {
 // GetBrowserInstance 获取浏览器实例详情
 func (h *Handler) GetBrowserInstance(c *gin.Context) {
 	id := c.Param("id")
-	
+
 	instance, err := h.db.GetBrowserInstance(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "error.notFound", "detail": err.Error()})
@@ -5028,7 +5028,7 @@ func (h *Handler) GetBrowserInstance(c *gin.Context) {
 // UpdateBrowserInstance 更新浏览器实例
 func (h *Handler) UpdateBrowserInstance(c *gin.Context) {
 	id := c.Param("id")
-	
+
 	var instance models.BrowserInstance
 	if err := c.ShouldBindJSON(&instance); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "error.invalidRequest", "detail": err.Error()})
@@ -5050,7 +5050,7 @@ func (h *Handler) UpdateBrowserInstance(c *gin.Context) {
 // DeleteBrowserInstance 删除浏览器实例
 func (h *Handler) DeleteBrowserInstance(c *gin.Context) {
 	id := c.Param("id")
-	
+
 	// 检查是否正在运行
 	if runtime, _ := h.browserManager.GetInstanceRuntime(id); runtime != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "error.instanceRunning", "detail": "Please stop the instance before deleting"})
@@ -5070,37 +5070,38 @@ func (h *Handler) DeleteBrowserInstance(c *gin.Context) {
 // StartBrowserInstance 启动浏览器实例
 func (h *Handler) StartBrowserInstance(c *gin.Context) {
 	id := c.Param("id")
-	
+
 	ctx := context.Background()
 	if err := h.browserManager.StartInstance(ctx, id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.startFailed", "detail": err.Error()})
+		logger.Error(ctx, "Failed to start browser instance: %s", err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.startBrowserFailed", "detail": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "success.instanceStarted",
+		"message": "success.browserStarted",
 	})
 }
 
 // StopBrowserInstance 停止浏览器实例
 func (h *Handler) StopBrowserInstance(c *gin.Context) {
 	id := c.Param("id")
-	
+
 	ctx := context.Background()
 	if err := h.browserManager.StopInstance(ctx, id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.stopFailed", "detail": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.stopBrowserFailed", "detail": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "success.instanceStopped",
+		"message": "success.browserStopped",
 	})
 }
 
 // SwitchBrowserInstance 切换当前活动实例
 func (h *Handler) SwitchBrowserInstance(c *gin.Context) {
 	id := c.Param("id")
-	
+
 	ctx := context.Background()
 	if err := h.browserManager.SwitchInstance(ctx, id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "error.switchFailed", "detail": err.Error()})

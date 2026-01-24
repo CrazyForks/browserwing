@@ -140,7 +140,7 @@ export default function BrowserManager() {
       // 如果有当前实例，启动当前实例
       if (currentInstance) {
         await api.startBrowserInstance(currentInstance.id)
-        showMessage(t('browser.messages.startSuccess'), 'success')
+        showMessage(t('success.browserStarted'), 'success')
       } else {
       // 否则使用旧的 API（向后兼容）
         const response = await api.startBrowser()
@@ -151,7 +151,7 @@ export default function BrowserManager() {
       await loadInstances()
       await loadCurrentInstance()
     } catch (err: any) {
-      showMessage(t(err.response?.data?.error || 'browser.messages.startError'), 'error')
+      showMessage(t(err.response?.data?.error || 'error.startBrowserFailed'), 'error')
     } finally {
       setStartingBrowser(false)
     }
