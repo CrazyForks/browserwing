@@ -7,6 +7,19 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
+// RefData 存储 RefID 对应的语义化定位信息（参考 agent-browser）
+// 使用 role+name+nth 而非 BackendNodeID，以提高稳定性
+type RefData struct {
+	Role        string            // ARIA role (button, link, textbox, etc.)
+	Name        string            // 可见文本或 aria-label
+	Nth         int               // 同 role+name 中的索引（用于处理重复元素）
+	BackendID   int               // BackendNodeID（用于快速路径+验证）
+	Tag         string            // HTML tag (可选)
+	Href        string            // 链接地址（对于 link）
+	Attributes  map[string]string // 其他关键属性（id, class等）
+	Placeholder string            // 占位符（可选）
+}
+
 // Page 表示一个浏览器页面及其上下文
 type Page struct {
 	RodPage              *rod.Page
@@ -29,6 +42,7 @@ type AccessibilityNode struct {
 	ID            string                        // 节点 ID（字符串形式的 AXNodeID）
 	AXNodeID      proto.AccessibilityAXNodeID   // Accessibility 节点 ID
 	BackendNodeID proto.DOMBackendNodeID        // DOM Backend 节点 ID
+	RefID         string                        // 引用 ID（如 e1, e2, e3...），用于稳定引用
 	Role          string                        // Accessibility Role（如 button, link, textbox 等）
 	Label         string                        // 节点标签/名称
 	Description   string                        // 节点描述

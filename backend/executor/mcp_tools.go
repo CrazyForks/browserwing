@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/browserwing/browserwing/pkg/logger"
@@ -535,7 +536,17 @@ func (r *MCPToolRegistry) registerScreenshotTool() error {
 			return mcpgo.NewToolResultError(err.Error()), nil
 		}
 
-		return mcpgo.NewToolResultText(result.Message), nil
+		// 构建返回消息，包含路径信息
+		message := result.Message
+		if path, ok := result.Data["path"].(string); ok && path != "" {
+			// 获取绝对路径
+			absPath, err := filepath.Abs(path)
+			if err == nil {
+				message = fmt.Sprintf("%s\nPath: %s", result.Message, absPath)
+			}
+		}
+
+		return mcpgo.NewToolResultText(message), nil
 	}
 
 	r.mcpServer.AddTool(tool, handler)
@@ -546,8 +557,26 @@ func (r *MCPToolRegistry) registerScreenshotTool() error {
 func (r *MCPToolRegistry) registerEvaluateTool() error {
 	tool := mcpgo.NewTool(
 		"browser_evaluate",
-		mcpgo.WithDescription("Execute JavaScript code in the browser context"),
-		mcpgo.WithString("script", mcpgo.Required(), mcpgo.Description("JavaScript code to execute")),
+		mcpgo.WithDescription(`Execute JavaScript code in the browser context. 
+The script will be automatically wrapped in a function if needed.
+
+Examples:
+1. Arrow function (recommended):
+   () => { return document.title; }
+   
+2. Direct statements (auto-wrapped):
+   return document.title;
+   const links = document.querySelectorAll('a'); return Array.from(links).map(l => l.href);
+   
+3. Multi-line code (auto-wrapped):
+   const links = [];
+   document.querySelectorAll('a').forEach(link => {
+       links.push({title: link.textContent, url: link.href});
+   });
+   return links;
+
+Note: Always use 'return' to return values. The result will be serialized as JSON.`),
+		mcpgo.WithString("script", mcpgo.Required(), mcpgo.Description("JavaScript code to execute (function or statements)")),
 	)
 
 	handler := func(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -905,10 +934,10 @@ func GetExecutorToolsMetadata() []ToolMetadata {
 		},
 		{
 			Name:        "browser_evaluate",
-			Description: "Execute JavaScript code in the browser context",
+			Description: "Execute JavaScript code in the browser context. Scripts are automatically wrapped in a function if needed. Use 'return' to return values. Examples: 'return document.title;' or 'const x = 1; return x + 2;'",
 			Category:    "Scripting",
 			Parameters: []ToolParameter{
-				{Name: "script", Type: "string", Required: true, Description: "JavaScript code to execute"},
+				{Name: "script", Type: "string", Required: true, Description: "JavaScript code to execute (will be auto-wrapped in () => {...} if needed)"},
 			},
 		},
 		{

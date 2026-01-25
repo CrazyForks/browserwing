@@ -483,15 +483,15 @@ func (tree *AccessibilitySnapshot) GetInputElements() []*AccessibilityNode {
 func (tree *AccessibilitySnapshot) SerializeToSimpleText() string {
 	var builder strings.Builder
 	builder.WriteString("Page Interactive Elements:\n")
-	builder.WriteString("(Use the exact identifier like 'Clickable Element [1]' or 'Input Element [1]' to interact with elements)\n\n")
+	builder.WriteString("(Use RefID like '@e1' or standard selectors like CSS/XPath to interact with elements)\n\n")
 
 	// 按类型分组
 	clickable := tree.GetClickableElements()
 	inputs := tree.GetInputElements()
 
 	if len(clickable) > 0 {
-		builder.WriteString("Clickable Elements (use identifier like 'Clickable Element [N]'):\n")
-		for i, node := range clickable {
+		builder.WriteString("Clickable Elements:\n")
+		for _, node := range clickable {
 			// 生成更明确的标识
 			label := node.Label
 			if label == "" {
@@ -504,22 +504,24 @@ func (tree *AccessibilitySnapshot) SerializeToSimpleText() string {
 				label = fmt.Sprintf("<%s>", node.Role)
 			}
 
-			// 格式：[索引] 标签 - 角色 - 描述
-			builder.WriteString(fmt.Sprintf("  [%d] %s", i+1, label))
-			if node.Role != "" {
-				builder.WriteString(fmt.Sprintf(" (role: %s)", node.Role))
+			// 格式：@refID 标签 (role: role) - 描述
+			if node.RefID != "" {
+				builder.WriteString(fmt.Sprintf("  @%s %s", node.RefID, label))
+				if node.Role != "" {
+					builder.WriteString(fmt.Sprintf(" (role: %s)", node.Role))
+				}
+				if node.Description != "" && node.Description != label {
+					builder.WriteString(fmt.Sprintf(" - %s", node.Description))
+				}
+				builder.WriteString("\n")
 			}
-			if node.Description != "" && node.Description != label {
-				builder.WriteString(fmt.Sprintf(" - %s", node.Description))
-			}
-			builder.WriteString("\n")
 		}
 		builder.WriteString("\n")
 	}
 
 	if len(inputs) > 0 {
-		builder.WriteString("Input Elements (use identifier like 'Input Element [N]'):\n")
-		for i, node := range inputs {
+		builder.WriteString("Input Elements:\n")
+		for _, node := range inputs {
 			// 生成更明确的标识
 			label := node.Label
 			if label == "" {
@@ -532,18 +534,20 @@ func (tree *AccessibilitySnapshot) SerializeToSimpleText() string {
 				label = fmt.Sprintf("<%s>", node.Role)
 			}
 
-			// 格式：[索引] 标签 - 角色 - placeholder - value
-			builder.WriteString(fmt.Sprintf("  [%d] %s", i+1, label))
-			if node.Role != "" {
-				builder.WriteString(fmt.Sprintf(" (role: %s)", node.Role))
+			// 格式：@refID 标签 (role: role) [placeholder: xxx]
+			if node.RefID != "" {
+				builder.WriteString(fmt.Sprintf("  @%s %s", node.RefID, label))
+				if node.Role != "" {
+					builder.WriteString(fmt.Sprintf(" (role: %s)", node.Role))
+				}
+				if node.Placeholder != "" && node.Placeholder != label {
+					builder.WriteString(fmt.Sprintf(" [placeholder: %s]", node.Placeholder))
+				}
+				if node.Value != "" {
+					builder.WriteString(fmt.Sprintf(" [value: %s]", node.Value))
+				}
+				builder.WriteString("\n")
 			}
-			if node.Placeholder != "" && node.Placeholder != label {
-				builder.WriteString(fmt.Sprintf(" [placeholder: %s]", node.Placeholder))
-			}
-			if node.Value != "" {
-				builder.WriteString(fmt.Sprintf(" [value: %s]", node.Value))
-			}
-			builder.WriteString("\n")
 		}
 	}
 
@@ -667,6 +671,37 @@ func GetElementFromPage(ctx context.Context, page *rod.Page, node *Accessibility
 	elem, err := page.ElementFromObject(obj.Object)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create element from object: %w", err)
+	}
+
+	// 检查是否是 Text 节点，如果是，返回其父元素
+	nodeType, err := elem.Eval(`() => this.nodeType`)
+	if err == nil && nodeType != nil {
+		// nodeType === 3 表示 Text 节点
+		// nodeType === 1 表示 Element 节点
+		if nodeType.Value.Int() == 3 {
+			logger.Info(ctx, "[GetElementFromPage] Node is a Text node, getting parent element")
+			// 使用 JavaScript 返回父元素
+			parentResult, err := elem.Eval(`() => {
+				return this.parentElement;
+			}`)
+			if err != nil {
+				return nil, fmt.Errorf("text node has no parent element: %w", err)
+			}
+			if parentResult == nil {
+				return nil, fmt.Errorf("text node parent is null")
+			}
+			
+			// 从返回的对象创建新的 Rod Element
+			parentObj := &proto.RuntimeRemoteObject{
+				Type:     "object",
+				Subtype:  "node",
+				ObjectID: proto.RuntimeRemoteObjectID(parentResult.ObjectID),
+			}
+			elem, err = page.ElementFromObject(parentObj)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create element from parent: %w", err)
+			}
+		}
 	}
 
 	return elem, nil

@@ -24,7 +24,7 @@ type ImageDownloader struct {
 // NewImageDownloader 创建图片下载器
 func NewImageDownloader(savePath string) *ImageDownloader {
 	// 确保保存目录存在
-	if err := os.MkdirAll(savePath, 0755); err != nil {
+	if err := os.MkdirAll(savePath, 0o755); err != nil {
 		panic(fmt.Sprintf("failed to create save path: %v", err))
 	}
 
@@ -81,7 +81,7 @@ func (d *ImageDownloader) DownloadImage(imageURL string) (string, error) {
 	}
 
 	// 保存到文件
-	if err := os.WriteFile(filePath, imageData, 0644); err != nil {
+	if err := os.WriteFile(filePath, imageData, 0o644); err != nil {
 		return "", errors.Wrap(err, "failed to save image")
 	}
 

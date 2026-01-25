@@ -3,8 +3,10 @@ package executor
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/browserwing/browserwing/pkg/logger"
 	"github.com/browserwing/browserwing/services/browser"
 	"github.com/go-rod/rod"
 )
@@ -14,13 +16,24 @@ import (
 type Executor struct {
 	Browser *browser.Manager
 	ctx     context.Context
+
+	// RefID 缓存（用于稳定的元素引用）
+	// 参考 agent-browser: 使用语义化定位器而非 BackendNodeID
+	refIDMutex     sync.RWMutex
+	refIDMap       map[string]*RefData // refID -> 语义化定位器数据
+	refIDCounter   int
+	refIDSnapshot  *AccessibilitySnapshot
+	refIDTimestamp time.Time
+	refIDTTL       time.Duration
 }
 
 // NewExecutor 创建 Executor 实例
 func NewExecutor(browser *browser.Manager) *Executor {
 	return &Executor{
-		Browser: browser,
-		ctx:     context.Background(),
+		Browser:  browser,
+		ctx:      context.Background(),
+		refIDMap: make(map[string]*RefData),
+		refIDTTL: 300 * time.Second, // 默认 300 秒 TTL（5分钟），更长的缓存时间
 	}
 }
 
@@ -54,14 +67,174 @@ func (e *Executor) GetPage() *Page {
 	return page
 }
 
-// GetAccessibilitySnapshot 获取页面的可访问性快照
+// GetAccessibilitySnapshot 获取页面的可访问性快照（带 RefID 缓存）
 func (e *Executor) GetAccessibilitySnapshot(ctx context.Context) (*AccessibilitySnapshot, error) {
 	page := e.Browser.GetActivePage()
 	if page == nil {
 		return nil, fmt.Errorf("no active page")
 	}
 
-	return GetAccessibilitySnapshot(ctx, page)
+	// 检查缓存
+	e.refIDMutex.RLock()
+	cacheValid := e.refIDSnapshot != nil && time.Since(e.refIDTimestamp) < e.refIDTTL
+	if cacheValid {
+		logger.Info(ctx, "[GetAccessibilitySnapshot] Using cached snapshot (age: %v, %d refs)", 
+			time.Since(e.refIDTimestamp), len(e.refIDMap))
+		cachedSnapshot := e.refIDSnapshot
+		e.refIDMutex.RUnlock()
+		return cachedSnapshot, nil
+	}
+	e.refIDMutex.RUnlock()
+
+	// 获取新快照
+	logger.Info(ctx, "[GetAccessibilitySnapshot] Fetching new accessibility snapshot")
+	snapshot, err := GetAccessibilitySnapshot(ctx, page)
+	if err != nil {
+		return nil, err
+	}
+
+	// 生成 RefID 并缓存
+	e.refIDMutex.Lock()
+	defer e.refIDMutex.Unlock()
+
+	e.refIDMap = make(map[string]*RefData)
+	e.refIDCounter = 0
+	e.assignRefIDs(snapshot)
+	e.refIDSnapshot = snapshot
+	e.refIDTimestamp = time.Now()
+
+	logger.Info(ctx, "[GetAccessibilitySnapshot] Cached new snapshot with %d refs (TTL: %v)",
+		len(e.refIDMap), e.refIDTTL)
+
+	return snapshot, nil
+}
+
+// assignRefIDs 为快照中的元素分配 RefID（参考 agent-browser 的实现）
+// 使用 role+name+nth 而非 BackendNodeID，以提高稳定性
+func (e *Executor) assignRefIDs(snapshot *AccessibilitySnapshot) {
+	// 跟踪 role:name 组合，用于处理重复元素
+	roleNameCounter := make(map[string]int) // "button:Submit" -> 0, 1, 2...
+	
+	// 为可点击元素分配 refID（e1, e2, e3...）
+	clickables := snapshot.GetClickableElements()
+	logger.Info(context.Background(), "[assignRefIDs] Assigning RefIDs to %d clickable elements", len(clickables))
+	clickableCount := 0
+	
+	for _, node := range clickables {
+		// 构建 role:name key
+		key := fmt.Sprintf("%s:%s", node.Role, node.Label)
+		nth := roleNameCounter[key]
+		roleNameCounter[key]++
+		
+		// 分配 RefID
+		e.refIDCounter++
+		refID := fmt.Sprintf("e%d", e.refIDCounter)
+		node.RefID = refID
+		
+		// 存储语义化定位器数据（参考 agent-browser）
+		// 存储尽可能多的信息以精确定位元素
+		refData := &RefData{
+			Role:       node.Role,
+			Name:       node.Label,
+			Nth:        nth,
+			BackendID:  int(node.BackendNodeID),
+			Attributes: make(map[string]string),
+		}
+		
+		// 对于链接，存储 href
+		if node.Role == "link" && node.Attributes != nil {
+			if href, ok := node.Attributes["href"]; ok {
+				refData.Href = href
+			}
+		}
+		
+		// 存储关键属性（id, class）
+		if node.Attributes != nil {
+			if id, ok := node.Attributes["id"]; ok && id != "" {
+				refData.Attributes["id"] = id
+			}
+			if class, ok := node.Attributes["class"]; ok && class != "" {
+				refData.Attributes["class"] = class
+			}
+		}
+		
+		e.refIDMap[refID] = refData
+		clickableCount++
+		
+		// 记录前10个元素用于调试
+		if clickableCount <= 10 {
+			logger.Info(context.Background(), "[assignRefIDs] %s -> role=%s, name=%s, nth=%d, backendID=%d", 
+				refID, node.Role, node.Label, nth, node.BackendNodeID)
+		}
+	}
+	logger.Info(context.Background(), "[assignRefIDs] Assigned %d RefIDs to clickable elements", clickableCount)
+
+	// 为输入元素分配 refID
+	inputs := snapshot.GetInputElements()
+	logger.Info(context.Background(), "[assignRefIDs] Processing %d input elements", len(inputs))
+	inputCount := 0
+	
+	for _, node := range inputs {
+		// 检查是否已分配（可点击元素中可能包含输入元素）
+		if node.RefID != "" {
+			logger.Info(context.Background(), "[assignRefIDs] Input element already has RefID: %s", node.RefID)
+			continue
+		}
+		
+		// 构建 role:name key
+		key := fmt.Sprintf("%s:%s", node.Role, node.Label)
+		nth := roleNameCounter[key]
+		roleNameCounter[key]++
+		
+		// 分配 RefID
+		e.refIDCounter++
+		refID := fmt.Sprintf("e%d", e.refIDCounter)
+		node.RefID = refID
+		
+		// 存储语义化定位器数据
+		refData := &RefData{
+			Role:       node.Role,
+			Name:       node.Label,
+			Nth:        nth,
+			BackendID:  int(node.BackendNodeID),
+			Attributes: make(map[string]string),
+		}
+		
+		// 存储 placeholder（对于输入元素）
+		if node.Placeholder != "" {
+			refData.Placeholder = node.Placeholder
+		}
+		
+		// 存储关键属性
+		if node.Attributes != nil {
+			if id, ok := node.Attributes["id"]; ok && id != "" {
+				refData.Attributes["id"] = id
+			}
+			if class, ok := node.Attributes["class"]; ok && class != "" {
+				refData.Attributes["class"] = class
+			}
+		}
+		
+		e.refIDMap[refID] = refData
+		inputCount++
+		
+		if inputCount <= 5 {
+			logger.Info(context.Background(), "[assignRefIDs] %s -> role=%s, name=%s, nth=%d, backendID=%d", 
+				refID, node.Role, node.Label, nth, node.BackendNodeID)
+		}
+	}
+	logger.Info(context.Background(), "[assignRefIDs] Assigned %d RefIDs to input elements", inputCount)
+	logger.Info(context.Background(), "[assignRefIDs] Total RefIDs in map: %d (using semantic locators)", len(e.refIDMap))
+}
+
+// InvalidateRefIDCache 清除 RefID 缓存
+func (e *Executor) InvalidateRefIDCache() {
+	e.refIDMutex.Lock()
+	defer e.refIDMutex.Unlock()
+
+	e.refIDMap = make(map[string]*RefData)
+	e.refIDCounter = 0
+	e.refIDSnapshot = nil
 }
 
 // RefreshAccessibilitySnapshot 刷新可访问性快照

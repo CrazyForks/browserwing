@@ -3,6 +3,8 @@ package executor
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -662,9 +664,12 @@ func (e *Executor) findElementWithTimeout(ctx context.Context, page *rod.Page, i
 	// 设置超时
 	timeoutPage := page.Timeout(timeout)
 
-	// 0. 尝试解析语义树索引格式，例如 "Input Element [1]", "Clickable Element [2]", "[3]"
-	if elem, err := e.findElementByAccessibilityIndex(ctx, page, identifier); err == nil && elem != nil {
-		return elem, nil
+	// 0. 尝试 RefID 格式：@e1, @e2, e1, e2（优先级最高，最稳定）
+	if strings.HasPrefix(identifier, "@") || (len(identifier) > 0 && identifier[0] == 'e' && len(identifier) <= 10) {
+		refID := strings.TrimPrefix(identifier, "@")
+		if elem, err := e.findElementByRefID(ctx, page, refID); err == nil && elem != nil {
+			return elem, nil
+		}
 	}
 
 	// 1. 尝试作为 CSS 选择器
@@ -700,104 +705,200 @@ func (e *Executor) findElementWithTimeout(ctx context.Context, page *rod.Page, i
 	return nil, fmt.Errorf("element not found: %s (timeout after %v)", identifier, timeout)
 }
 
-// findElementByAccessibilityIndex 通过可访问性索引查找元素
-// 支持格式：
-// - "Input Element [1]"
-// - "Clickable Element [2]"
-// - "[3]"
-// - "input [1]"
-// - "clickable [2]"
-func (e *Executor) findElementByAccessibilityIndex(ctx context.Context, page *rod.Page, identifier string) (*rod.Element, error) {
-	// 使用正则解析索引格式
-	identifier = strings.TrimSpace(identifier)
-
-	// 尝试匹配不同的索引格式
-	var elementType string
-	var index int
-
-	// 格式 1: "Input Element [N]" 或 "Clickable Element [N]"
-	if strings.Contains(identifier, "Input Element") {
-		_, err := fmt.Sscanf(identifier, "Input Element [%d]", &index)
-		if err == nil {
-			elementType = "input"
-		}
-	} else if strings.Contains(identifier, "Clickable Element") {
-		_, err := fmt.Sscanf(identifier, "Clickable Element [%d]", &index)
-		if err == nil {
-			elementType = "clickable"
-		}
-	} else if strings.HasPrefix(strings.ToLower(identifier), "input [") {
-		// 格式 2: "input [N]"
-		_, err := fmt.Sscanf(identifier, "input [%d]", &index)
-		if err != nil {
-			_, err = fmt.Sscanf(identifier, "Input [%d]", &index)
-		}
-		if err == nil {
-			elementType = "input"
-		}
-	} else if strings.HasPrefix(strings.ToLower(identifier), "clickable [") {
-		// 格式 3: "clickable [N]"
-		_, err := fmt.Sscanf(identifier, "clickable [%d]", &index)
-		if err != nil {
-			_, err = fmt.Sscanf(identifier, "Clickable [%d]", &index)
-		}
-		if err == nil {
-			elementType = "clickable"
-		}
-	} else if strings.HasPrefix(identifier, "[") && strings.HasSuffix(identifier, "]") {
-		// 格式 4: "[N]" - 需要从上下文推断类型，默认尝试输入元素
-		_, err := fmt.Sscanf(identifier, "[%d]", &index)
-		if err == nil {
-			elementType = "any" // 尝试所有类型
-		}
+// findElementByRefID 通过 RefID 查找元素（如 e1, e2, e3）
+// 混合策略：优先使用 BackendNodeID（快速），失败时使用语义化定位器
+func (e *Executor) findElementByRefID(ctx context.Context, page *rod.Page, refID string) (*rod.Element, error) {
+	logger.Info(ctx, "[findElementByRefID] Looking up refID: %s", refID)
+	
+	// 查找 RefID 对应的定位器数据
+	e.refIDMutex.RLock()
+	refData, found := e.refIDMap[refID]
+	cacheAge := time.Since(e.refIDTimestamp)
+	e.refIDMutex.RUnlock()
+	
+	if !found {
+		logger.Warn(ctx, "[findElementByRefID] RefID %s not found in cache (age: %v)", refID, cacheAge)
+		return nil, fmt.Errorf("refID %s not found (cache may be stale, run browser_snapshot first)", refID)
 	}
-
-	if index <= 0 {
-		return nil, fmt.Errorf("invalid accessibility index")
-	}
-
-	// 获取可访问性快照
-	snapshot, err := e.GetAccessibilitySnapshot(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// 根据类型查找对应的元素
-	var targetNode *AccessibilityNode
-
-	switch elementType {
-	case "input":
-		inputs := snapshot.GetInputElements()
-		if index > 0 && index <= len(inputs) {
-			targetNode = inputs[index-1]
-		}
-	case "clickable":
-		clickables := snapshot.GetClickableElements()
-		if index > 0 && index <= len(clickables) {
-			targetNode = clickables[index-1]
-		}
-	case "any":
-		// 先尝试输入元素
-		inputs := snapshot.GetInputElements()
-		if index > 0 && index <= len(inputs) {
-			targetNode = inputs[index-1]
-		}
-		// 如果没找到，再尝试可点击元素
-		if targetNode == nil {
-			clickables := snapshot.GetClickableElements()
-			if index > 0 && index <= len(clickables) {
-				targetNode = clickables[index-1]
+	
+	logger.Info(ctx, "[findElementByRefID] Found refData for %s: role=%s, name=%s, backendID=%d, href=%s (cache age: %v)", 
+		refID, refData.Role, refData.Name, refData.BackendID, refData.Href, cacheAge)
+	
+	// 策略 1：尝试使用 BackendNodeID（最快最准确）
+	if refData.BackendID != 0 {
+		elem, err := e.findByBackendNodeID(ctx, page, refData.BackendID)
+		if err == nil {
+			// 验证元素是否匹配（防止DOM变化）
+			if e.validateElement(ctx, elem, refData) {
+				logger.Info(ctx, "[findElementByRefID] Found element via BackendNodeID for %s", refID)
+				return elem, nil
 			}
+			logger.Warn(ctx, "[findElementByRefID] BackendNodeID element doesn't match, trying semantic locator")
 		}
 	}
-
-	if targetNode == nil {
-		return nil, fmt.Errorf("element not found at index %d", index)
+	
+	// 策略 2：使用精确属性匹配（href, id, class）
+	if refData.Href != "" || (refData.Attributes != nil && refData.Attributes["id"] != "") {
+		elem, err := e.findByAttributes(ctx, page, refData)
+		if err == nil {
+			logger.Info(ctx, "[findElementByRefID] Found element via attributes for %s", refID)
+			return elem, nil
+		}
+		logger.Warn(ctx, "[findElementByRefID] Attribute-based search failed: %v", err)
 	}
-
-	// 通过可访问性节点查找实际的 Rod 元素
-	return GetElementFromPage(ctx, page, targetNode)
+	
+	// 策略 3：使用 role + name + nth（fallback）
+	xpath := buildXPathFromRole(refData.Role, refData.Name)
+	logger.Info(ctx, "[findElementByRefID] Built XPath: %s", xpath)
+	
+	elements, err := page.ElementsX(xpath)
+	if err != nil {
+		logger.Error(ctx, "[findElementByRefID] XPath query failed: %v", err)
+		return nil, fmt.Errorf("failed to find elements for refID %s: %w", refID, err)
+	}
+	
+	// 策略 4：通用文本查找（最后的fallback）
+	if len(elements) == 0 && refData.Name != "" {
+		logger.Warn(ctx, "[findElementByRefID] Role-based XPath found no elements, trying fallback text search")
+		
+		searchText := refData.Name
+		if len(searchText) > 30 {
+			searchText = searchText[:30]
+		}
+		
+		fallbackXPath := fmt.Sprintf(`//*[contains(normalize-space(.), '%s') and (
+			self::a or self::button or 
+			@role='button' or @role='link' or @role='menuitem' or 
+			contains(@class, 'btn') or contains(@class, 'link') or contains(@class, 'click') or
+			@onclick or @cursor='pointer'
+		)]`, searchText)
+		
+		logger.Info(ctx, "[findElementByRefID] Fallback XPath: %s", fallbackXPath)
+		elements, err = page.ElementsX(fallbackXPath)
+		if err != nil {
+			logger.Error(ctx, "[findElementByRefID] Fallback XPath query failed: %v", err)
+		}
+	}
+	
+	if len(elements) == 0 {
+		logger.Warn(ctx, "[findElementByRefID] No elements found for refID %s (role=%s, name=%s) even after fallback", 
+			refID, refData.Role, refData.Name)
+		return nil, fmt.Errorf("element not found for refID %s (page may have changed, run browser_snapshot again)", refID)
+	}
+	
+	logger.Info(ctx, "[findElementByRefID] Found %d matching elements, selecting nth=%d", len(elements), refData.Nth)
+	
+	// 选择第 nth 个匹配的元素
+	if refData.Nth >= len(elements) {
+		logger.Error(ctx, "[findElementByRefID] nth=%d out of range (only found %d elements)", refData.Nth, len(elements))
+		return nil, fmt.Errorf("refID %s: nth=%d out of range (found %d elements)", refID, refData.Nth, len(elements))
+	}
+	
+	elem := elements[refData.Nth]
+	logger.Info(ctx, "[findElementByRefID] Successfully selected element at nth=%d for refID %s", refData.Nth, refID)
+	
+	// 检查是否是 Text 节点，如果是，返回其父元素
+	nodeType, err := elem.Eval(`() => this.nodeType`)
+	if err == nil && nodeType != nil && nodeType.Value.Int() == 3 {
+		logger.Info(ctx, "[findElementByRefID] RefID %s points to Text node, getting parent", refID)
+		parentResult, err := elem.Eval(`() => { return this.parentElement; }`)
+		if err != nil {
+			return nil, fmt.Errorf("text node has no parent element: %w", err)
+		}
+		if parentResult == nil {
+			return nil, fmt.Errorf("text node parent is null")
+		}
+		
+		parentObj := &proto.RuntimeRemoteObject{
+			Type:     "object",
+			Subtype:  "node",
+			ObjectID: proto.RuntimeRemoteObjectID(parentResult.ObjectID),
+		}
+		elem, err = page.ElementFromObject(parentObj)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create element from parent: %w", err)
+		}
+		logger.Info(ctx, "[findElementByRefID] Successfully got parent element for Text node")
+	}
+	
+	return elem, nil
 }
+
+// findByBackendNodeID 通过 BackendNodeID 查找元素
+func (e *Executor) findByBackendNodeID(ctx context.Context, page *rod.Page, backendID int) (*rod.Element, error) {
+	obj, err := proto.DOMResolveNode{
+		BackendNodeID: proto.DOMBackendNodeID(backendID),
+	}.Call(page)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve BackendNodeID %d: %w", backendID, err)
+	}
+	
+	if obj.Object.ObjectID == "" {
+		return nil, fmt.Errorf("BackendNodeID %d has no ObjectID", backendID)
+	}
+	
+	elem, err := page.ElementFromObject(obj.Object)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create element from BackendNodeID: %w", err)
+	}
+	
+	return elem, nil
+}
+
+// findByAttributes 通过精确属性匹配查找元素
+func (e *Executor) findByAttributes(ctx context.Context, page *rod.Page, refData *RefData) (*rod.Element, error) {
+	var xpath string
+	
+	// 优先使用 href（对于链接最精确）
+	if refData.Href != "" {
+		xpath = fmt.Sprintf("//a[@href='%s']", refData.Href)
+		logger.Info(ctx, "[findByAttributes] Using href: %s", xpath)
+	} else if id, ok := refData.Attributes["id"]; ok && id != "" {
+		// 其次使用 id
+		xpath = fmt.Sprintf("//*[@id='%s']", id)
+		logger.Info(ctx, "[findByAttributes] Using id: %s", xpath)
+	} else {
+		return nil, fmt.Errorf("no unique attributes available")
+	}
+	
+	elem, err := page.ElementX(xpath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find element by attributes: %w", err)
+	}
+	
+	return elem, nil
+}
+
+// validateElement 验证元素是否匹配预期
+func (e *Executor) validateElement(ctx context.Context, elem *rod.Element, refData *RefData) bool {
+	// 对于链接，验证 href
+	if refData.Href != "" {
+		href, err := elem.Attribute("href")
+		if err == nil && href != nil && *href == refData.Href {
+			return true
+		}
+		logger.Warn(ctx, "[validateElement] href mismatch: expected=%s, got=%v", refData.Href, href)
+		return false
+	}
+	
+	// 验证文本内容
+	if refData.Name != "" {
+		text, err := elem.Text()
+		if err == nil && strings.Contains(text, refData.Name[:min(len(refData.Name), 20)]) {
+			return true
+		}
+	}
+	
+	return true // 默认通过
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 
 // Hover 鼠标悬停
 func (e *Executor) Hover(ctx context.Context, identifier string, opts *HoverOptions) (*OperationResult, error) {
@@ -986,15 +1087,33 @@ func (e *Executor) Screenshot(ctx context.Context, opts *ScreenshotOptions) (*Op
 		}, err
 	}
 
+	// 保存截图到文件
+	screenshotPath, saveErr := e.saveScreenshot(ctx, data, opts.Format)
+	if saveErr != nil {
+		logger.Warn(ctx, "Failed to save screenshot to file: %v", saveErr)
+	}
+
+	resultData := map[string]interface{}{
+		"data":   data,
+		"format": opts.Format,
+		"size":   len(data),
+	}
+	
+	// 如果保存成功，添加路径信息
+	if screenshotPath != "" {
+		resultData["path"] = screenshotPath
+	}
+
+	message := fmt.Sprintf("Successfully captured screenshot (%d bytes)", len(data))
+	if screenshotPath != "" {
+		message = fmt.Sprintf("Successfully captured screenshot (%d bytes) and saved to: %s", len(data), screenshotPath)
+	}
+
 	return &OperationResult{
 		Success:   true,
-		Message:   fmt.Sprintf("Successfully captured screenshot (%d bytes)", len(data)),
+		Message:   message,
 		Timestamp: time.Now(),
-		Data: map[string]interface{}{
-			"data":   data,
-			"format": opts.Format,
-			"size":   len(data),
-		},
+		Data:      resultData,
 	}, nil
 }
 
@@ -1463,7 +1582,10 @@ func safeEvaluate(ctx context.Context, page *rod.Page, script string, result int
 		}
 	}()
 
-	evalResult, evalErr := page.Eval(script)
+	// 智能包装脚本：如果不是函数格式，自动包装为箭头函数
+	wrappedScript := wrapScriptIfNeeded(script)
+
+	evalResult, evalErr := page.Eval(wrappedScript)
 	if evalErr != nil {
 		return evalErr
 	}
@@ -1474,6 +1596,26 @@ func safeEvaluate(ctx context.Context, page *rod.Page, script string, result int
 	}
 
 	return nil
+}
+
+// wrapScriptIfNeeded 智能包装脚本
+// 如果脚本不是函数格式，自动包装为箭头函数
+func wrapScriptIfNeeded(script string) string {
+	script = strings.TrimSpace(script)
+	
+	// 检测是否已经是函数格式
+	// 1. 箭头函数：() => { ... } 或 () => ...
+	// 2. 普通函数：function() { ... }
+	// 3. 异步函数：async () => { ... } 或 async function() { ... }
+	if strings.HasPrefix(script, "()") ||
+		strings.HasPrefix(script, "function") ||
+		strings.HasPrefix(script, "async ") {
+		return script
+	}
+
+	// 不是函数格式，需要包装
+	// 包装为箭头函数：() => { 用户代码 }
+	return fmt.Sprintf("() => {\n%s\n}", script)
 }
 
 // TabsAction 标签页操作类型
@@ -2023,4 +2165,30 @@ func (e *Executor) submitForm(ctx context.Context, page *rod.Page) error {
 	}
 
 	return fmt.Errorf("no submit button found")
+}
+
+// saveScreenshot 将截图数据保存到文件
+func (e *Executor) saveScreenshot(ctx context.Context, data []byte, format string) (string, error) {
+	// 创建 screenshots 目录
+	screenshotsDir := "screenshots"
+	if err := os.MkdirAll(screenshotsDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create screenshots directory: %w", err)
+	}
+
+	// 生成文件名：screenshot_YYYYMMDD_HHMMSS.{format}
+	timestamp := time.Now().Format("20060102_150405")
+	extension := format
+	if extension == "jpg" {
+		extension = "jpeg"
+	}
+	filename := fmt.Sprintf("screenshot_%s.%s", timestamp, extension)
+	filepath := filepath.Join(screenshotsDir, filename)
+
+	// 保存文件
+	if err := os.WriteFile(filepath, data, 0644); err != nil {
+		return "", fmt.Errorf("failed to write screenshot file: %w", err)
+	}
+
+	logger.Info(ctx, "Screenshot saved to: %s", filepath)
+	return filepath, nil
 }

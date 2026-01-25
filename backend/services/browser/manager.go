@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -250,6 +251,13 @@ func (m *Manager) Start(ctx context.Context) error {
 					logger.Warn(ctx, "Will not use user data directory, may cause startup failure")
 				} else {
 					os.Remove(testFile)
+
+					// 清理可能存在的锁文件（在启动前）
+					logger.Info(ctx, "Checking and cleaning up lock files before launch...")
+					if err := m.cleanupSingletonLock(ctx, userDataDir); err != nil {
+						logger.Warn(ctx, "Failed to cleanup singleton lock: %v", err)
+					}
+
 					l = l.UserDataDir(userDataDir)
 					logger.Info(ctx, fmt.Sprintf("✓ Using user data directory: %s", userDataDir))
 				}
@@ -265,6 +273,13 @@ func (m *Manager) Start(ctx context.Context) error {
 		if err != nil {
 			errMsg := err.Error()
 			logger.Error(ctx, "Failed to start browser, detailed error: %v", err)
+
+			// 如果是 SingletonLock 错误，尝试清理并给出提示
+			if m.config.Browser != nil && m.config.Browser.UserDataDir != "" && strings.Contains(errMsg, "SingletonLock") {
+				logger.Error(ctx, "Browser launch failed due to SingletonLock, attempting cleanup...")
+				m.cleanupSingletonLock(ctx, m.config.Browser.UserDataDir)
+				return fmt.Errorf("failed to launch browser (SingletonLock issue): %w\nTip: The lock files have been cleaned up. Please try starting the browser again", err)
+			}
 
 			// 检查是否是因为 Chrome 已经在运行
 			if strings.Contains(errMsg, "会话") || strings.Contains(errMsg, "session") || strings.Contains(errMsg, "already") {
@@ -452,6 +467,18 @@ func (m *Manager) Stop() error {
 			m.launcher.Kill()
 			logger.Info(ctx, "Browser process terminated")
 		}
+
+		// 6. 清理本地浏览器的锁文件
+		if m.config.Browser != nil && m.config.Browser.UserDataDir != "" {
+			// 等待浏览器完全退出
+			time.Sleep(500 * time.Millisecond)
+
+			if err := m.cleanupSingletonLock(ctx, m.config.Browser.UserDataDir); err != nil {
+				logger.Warn(ctx, "Failed to cleanup singleton lock after stop: %v", err)
+			} else {
+				logger.Info(ctx, "✓ Cleaned up singleton lock files")
+			}
+		}
 	}
 
 	m.browser = nil
@@ -594,9 +621,18 @@ func (m *Manager) setPageWindow(page *rod.Page) {
 
 // OpenPage 打开一个新页面
 // instanceID: 指定实例ID，空字符串表示使用当前实例
-func (m *Manager) OpenPage(url string, language string, instanceID string, norecord ...bool) error {
+func (m *Manager) OpenPage(url string, language string, instanceID string, norecord ...bool) (err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// 捕获 panic 并转换为错误
+	defer func() {
+		if r := recover(); r != nil {
+			ctx := context.Background()
+			logger.Error(ctx, "Panic in OpenPage: %v", r)
+			err = fmt.Errorf("failed to open page: browser connection may be closed (panic: %v)", r)
+		}
+	}()
 
 	var noRecord bool
 	if len(norecord) > 0 {
@@ -604,9 +640,24 @@ func (m *Manager) OpenPage(url string, language string, instanceID string, norec
 	}
 
 	// 获取指定实例的浏览器
-	browser, _, _, err := m.getInstanceBrowser(instanceID)
+	browser, _, instance, err := m.getInstanceBrowser(instanceID)
 	if err != nil {
 		return err
+	}
+
+	// 使用实际的实例ID（可能从空字符串转换为 default）
+	if instance != nil {
+		instanceID = instance.ID
+	} else if instanceID == "" {
+		// 向后兼容：如果没有 instance 对象，使用 currentInstanceID
+		instanceID = m.currentInstanceID
+	}
+
+	// 检查浏览器连接是否仍然有效
+	ctx := context.Background()
+	if err := checkBrowserConnection(browser); err != nil {
+		logger.Error(ctx, "Browser connection check failed: %v", err)
+		return fmt.Errorf("browser connection is closed or invalid: %w", err)
 	}
 
 	// 保存当前语言设置,用于后续注入脚本时的文本替换
@@ -617,7 +668,6 @@ func (m *Manager) OpenPage(url string, language string, instanceID string, norec
 
 	// 根据URL匹配配置
 	config := m.getConfigForURL(url)
-	ctx := context.Background()
 	logger.Info(ctx, fmt.Sprintf("URL: %s, using configuration: %s, language: %s", url, config.Name, language))
 
 	var page *rod.Page
@@ -878,23 +928,38 @@ func (m *Manager) ClearInPageRecordingState() {
 
 // PlayScript 回放脚本
 // instanceID: 指定实例ID，空字符串表示使用当前实例
-func (m *Manager) PlayScript(ctx context.Context, script *models.Script, instanceID string) (*models.PlayResult, *rod.Page, error) {
+func (m *Manager) PlayScript(ctx context.Context, script *models.Script, instanceID string) (result *models.PlayResult, page *rod.Page, err error) {
+	// 捕获 panic 并转换为错误
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error(ctx, "Panic in PlayScript: %v", r)
+			err = fmt.Errorf("failed to play script: browser connection may be closed (panic: %v)", r)
+			result = nil
+			page = nil
+		}
+	}()
+
 	// 获取指定实例的浏览器
 	browser, _, instance, err := m.getInstanceBrowser(instanceID)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// 确定使用的实例ID
-	usedInstanceID := instanceID
-	if usedInstanceID == "" {
-		usedInstanceID = m.currentInstanceID
+	// 检查浏览器连接是否仍然有效
+	if err := checkBrowserConnection(browser); err != nil {
+		logger.Error(ctx, "Browser connection check failed: %v", err)
+		return nil, nil, fmt.Errorf("browser connection is closed or invalid: %w", err)
 	}
 
-	// 获取实例名称
+	// 确定使用的实例ID（从 instance 对象获取，可能从空字符串转换为 default）
+	usedInstanceID := instanceID
 	instanceName := ""
 	if instance != nil {
+		usedInstanceID = instance.ID
 		instanceName = instance.Name
+	} else if usedInstanceID == "" {
+		// 向后兼容：如果没有 instance 对象，使用 currentInstanceID
+		usedInstanceID = m.currentInstanceID
 	}
 
 	// 创建执行记录
@@ -921,8 +986,6 @@ func (m *Manager) PlayScript(ctx context.Context, script *models.Script, instanc
 	logger.Info(ctx, fmt.Sprintf("Replay script URL: %s, using configuration: %s", scriptURL, config.Name))
 
 	// 创建新页面用于回放
-	var page *rod.Page
-
 	// 根据配置决定是否使用 stealth
 	useStealth := true // 默认使用stealth
 	if config.UseStealth != nil {
@@ -1288,8 +1351,81 @@ func (m *Manager) getDefaultBrowserConfig() *models.BrowserConfig {
 
 // ==================== 多实例管理 ====================
 
+// checkBrowserConnection 检查浏览器连接是否仍然有效
+func checkBrowserConnection(browser *rod.Browser) error {
+	if browser == nil {
+		return fmt.Errorf("browser is nil")
+	}
+
+	// 尝试获取浏览器页面列表，这是一个轻量级的检查
+	// 如果连接已关闭，这个调用会失败
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := browser.Context(ctx).Pages()
+	if err != nil {
+		return fmt.Errorf("failed to get browser pages: connection may be closed: %w", err)
+	}
+
+	return nil
+}
+
+// cleanupSingletonLock 清理 Chrome 的进程单例锁文件
+// 这些锁文件在 Chrome 异常退出时可能没有被清理，导致无法启动新实例
+func (m *Manager) cleanupSingletonLock(ctx context.Context, userDataDir string) error {
+	// Chrome 在用户数据目录中创建的锁文件
+	lockFiles := []string{
+		"SingletonLock",
+		"SingletonCookie",
+		"SingletonSocket",
+	}
+
+	var cleanedFiles []string
+	var failedFiles []string
+
+	for _, lockFile := range lockFiles {
+		lockPath := filepath.Join(userDataDir, lockFile)
+
+		// 检查文件是否存在
+		if _, err := os.Stat(lockPath); err == nil {
+			// 尝试删除锁文件，最多重试 3 次
+			deleted := false
+			for attempt := 1; attempt <= 3; attempt++ {
+				if err := os.Remove(lockPath); err != nil {
+					if attempt < 3 {
+						// 等待一小段时间后重试
+						time.Sleep(100 * time.Millisecond)
+						continue
+					}
+					// 最后一次尝试失败
+					logger.Warn(ctx, "Failed to remove lock file %s after %d attempts: %v", lockFile, attempt, err)
+					failedFiles = append(failedFiles, lockFile)
+				} else {
+					deleted = true
+					break
+				}
+			}
+
+			if deleted {
+				cleanedFiles = append(cleanedFiles, lockFile)
+			}
+		}
+	}
+
+	if len(cleanedFiles) > 0 {
+		logger.Info(ctx, "Cleaned up lock files: %v", cleanedFiles)
+	}
+
+	if len(failedFiles) > 0 {
+		logger.Warn(ctx, "Failed to clean some lock files: %v (may need manual cleanup or process is still running)", failedFiles)
+	}
+
+	return nil
+}
+
 // getInstanceBrowser 获取指定实例的浏览器和活动页面
 // 如果 instanceID 为空，则使用当前实例
+// 如果 default 实例未运行，会自动启动它
 // 返回: browser, activePage, instance, error
 func (m *Manager) getInstanceBrowser(instanceID string) (*rod.Browser, *rod.Page, *models.BrowserInstance, error) {
 	// 如果没有指定实例ID，使用当前实例
@@ -1303,12 +1439,39 @@ func (m *Manager) getInstanceBrowser(instanceID string) (*rod.Browser, *rod.Page
 		if m.isRunning && m.browser != nil {
 			return m.browser, m.activePage, nil, nil
 		}
-		return nil, nil, nil, fmt.Errorf("no running instance available")
+
+		// 尝试使用 default 实例
+		instanceID = "default"
+		ctx := context.Background()
+		logger.Info(ctx, "No current instance, attempting to use default instance")
 	}
 
 	// 获取实例运行时信息
 	runtime, exists := m.instances[instanceID]
 	if !exists || runtime == nil {
+		// 如果是 default 实例且未运行，尝试自动启动
+		if instanceID == "default" {
+			ctx := context.Background()
+			logger.Info(ctx, "Default instance not running, attempting to auto-start...")
+
+			// 调用内部启动函数（调用者已持有锁）
+			err := m.startInstanceInternal(ctx, "default")
+			if err != nil {
+				logger.Error(ctx, "Failed to auto-start default instance: %v", err)
+				return nil, nil, nil, fmt.Errorf("default instance not running and failed to start: %w", err)
+			}
+
+			logger.Info(ctx, "✓ Default instance auto-started successfully")
+
+			// 重新获取运行时信息
+			runtime, exists = m.instances["default"]
+			if !exists || runtime == nil {
+				return nil, nil, nil, fmt.Errorf("default instance started but runtime not found")
+			}
+
+			return runtime.browser, runtime.activePage, runtime.instance, nil
+		}
+
 		return nil, nil, nil, fmt.Errorf("instance %s is not running", instanceID)
 	}
 
@@ -1353,6 +1516,11 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.startInstanceInternal(ctx, instanceID)
+}
+
+// startInstanceInternal 内部启动函数，调用者必须已持有锁
+func (m *Manager) startInstanceInternal(ctx context.Context, instanceID string) error {
 	// 检查实例是否已启动
 	if runtime, exists := m.instances[instanceID]; exists && runtime != nil {
 		return fmt.Errorf("instance %s is already running", instanceID)
@@ -1474,6 +1642,12 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 			if err := os.MkdirAll(instance.UserDataDir, 0o755); err != nil {
 				logger.Warn(ctx, "Failed to create user data directory: %v", err)
 			} else {
+				// 主动清理可能存在的锁文件（在启动前）
+				logger.Info(ctx, "Checking and cleaning up lock files before launch...")
+				if err := m.cleanupSingletonLock(ctx, instance.UserDataDir); err != nil {
+					logger.Warn(ctx, "Failed to cleanup singleton lock: %v", err)
+				}
+
 				l = l.UserDataDir(instance.UserDataDir)
 				logger.Info(ctx, "Using user data directory: %s", instance.UserDataDir)
 			}
@@ -1482,6 +1656,12 @@ func (m *Manager) StartInstance(ctx context.Context, instanceID string) error {
 		// 启动浏览器
 		url, err = l.Launch()
 		if err != nil {
+			// 如果启动失败，尝试再次清理锁文件并给出提示
+			if instance.UserDataDir != "" && strings.Contains(err.Error(), "SingletonLock") {
+				logger.Error(ctx, "Browser launch failed due to SingletonLock, attempting cleanup...")
+				m.cleanupSingletonLock(ctx, instance.UserDataDir)
+				return fmt.Errorf("failed to launch browser (SingletonLock issue): %w\nTip: The lock files have been cleaned up. Please try starting the instance again", err)
+			}
 			return fmt.Errorf("failed to launch browser: %w", err)
 		}
 
@@ -1600,6 +1780,18 @@ func (m *Manager) StopInstance(ctx context.Context, instanceID string) error {
 		time.Sleep(1 * time.Second)
 		runtime.launcher.Kill()
 		logger.Info(ctx, "Browser process terminated")
+	}
+
+	// 清理本地实例的锁文件
+	if !isRemote && runtime.instance.UserDataDir != "" {
+		// 等待浏览器完全退出
+		time.Sleep(500 * time.Millisecond)
+
+		if err := m.cleanupSingletonLock(ctx, runtime.instance.UserDataDir); err != nil {
+			logger.Warn(ctx, "Failed to cleanup singleton lock after stop: %v", err)
+		} else {
+			logger.Info(ctx, "✓ Cleaned up singleton lock files for stopped instance")
+		}
 	}
 
 	// 更新实例状态
