@@ -482,17 +482,20 @@ func (tree *AccessibilitySnapshot) GetInputElements() []*AccessibilityNode {
 // SerializeToSimpleText 将语义树序列化为简单文本（用于 LLM）
 func (tree *AccessibilitySnapshot) SerializeToSimpleText() string {
 	var builder strings.Builder
-	builder.WriteString("Page Interactive Elements:\n")
-	builder.WriteString("(Use RefID like '@e1' or standard selectors like CSS/XPath to interact with elements)\n\n")
+	
+	// 标题和说明
+	builder.WriteString("=== Interactive Elements ===\n")
+	builder.WriteString("Use RefIDs (e.g., @e1, @e2) as identifiers for interactions.\n\n")
 
 	// 按类型分组
 	clickable := tree.GetClickableElements()
 	inputs := tree.GetInputElements()
 
+	// 可点击元素
 	if len(clickable) > 0 {
-		builder.WriteString("Clickable Elements:\n")
+		builder.WriteString("CLICKABLE:\n")
 		for _, node := range clickable {
-			// 生成更明确的标识
+			// 生成标签（限制长度避免混淆）
 			label := node.Label
 			if label == "" {
 				label = node.Text
@@ -503,15 +506,19 @@ func (tree *AccessibilitySnapshot) SerializeToSimpleText() string {
 			if label == "" {
 				label = fmt.Sprintf("<%s>", node.Role)
 			}
+			
+			// 截断过长的标签
+			if len(label) > 50 {
+				label = label[:47] + "..."
+			}
 
-			// 格式：@refID 标签 (role: role) - 描述
+			// 清晰格式：RefID 在前，用破折号分隔
 			if node.RefID != "" {
-				builder.WriteString(fmt.Sprintf("  @%s %s", node.RefID, label))
-				if node.Role != "" {
-					builder.WriteString(fmt.Sprintf(" (role: %s)", node.Role))
-				}
-				if node.Description != "" && node.Description != label {
-					builder.WriteString(fmt.Sprintf(" - %s", node.Description))
+				builder.WriteString(fmt.Sprintf("  @%s - %s", node.RefID, label))
+				
+				// 角色信息简化
+				if node.Role != "" && node.Role != "StaticText" {
+					builder.WriteString(fmt.Sprintf(" (%s)", node.Role))
 				}
 				builder.WriteString("\n")
 			}
@@ -519,10 +526,11 @@ func (tree *AccessibilitySnapshot) SerializeToSimpleText() string {
 		builder.WriteString("\n")
 	}
 
+	// 输入元素
 	if len(inputs) > 0 {
-		builder.WriteString("Input Elements:\n")
+		builder.WriteString("INPUT:\n")
 		for _, node := range inputs {
-			// 生成更明确的标识
+			// 生成标签
 			label := node.Label
 			if label == "" {
 				label = node.Placeholder
@@ -533,13 +541,22 @@ func (tree *AccessibilitySnapshot) SerializeToSimpleText() string {
 			if label == "" {
 				label = fmt.Sprintf("<%s>", node.Role)
 			}
+			
+			// 截断过长的标签
+			if len(label) > 50 {
+				label = label[:47] + "..."
+			}
 
-			// 格式：@refID 标签 (role: role) [placeholder: xxx]
+			// 清晰格式
 			if node.RefID != "" {
-				builder.WriteString(fmt.Sprintf("  @%s %s", node.RefID, label))
+				builder.WriteString(fmt.Sprintf("  @%s - %s", node.RefID, label))
+				
+				// 角色信息
 				if node.Role != "" {
-					builder.WriteString(fmt.Sprintf(" (role: %s)", node.Role))
+					builder.WriteString(fmt.Sprintf(" (%s)", node.Role))
 				}
+				
+				// 占位符和值
 				if node.Placeholder != "" && node.Placeholder != label {
 					builder.WriteString(fmt.Sprintf(" [placeholder: %s]", node.Placeholder))
 				}
@@ -549,7 +566,15 @@ func (tree *AccessibilitySnapshot) SerializeToSimpleText() string {
 				builder.WriteString("\n")
 			}
 		}
+		builder.WriteString("\n")
 	}
+	
+	// 重要提示
+	builder.WriteString("USAGE:\n")
+	builder.WriteString("  • Click: {\"identifier\": \"@e1\"}  ✓ Correct\n")
+	builder.WriteString("  • Type:  {\"identifier\": \"@e5\", \"text\": \"hello\"}  ✓ Correct\n")
+	builder.WriteString("  • DO NOT use text labels as identifiers  ✗ Wrong\n")
+	builder.WriteString("  • ALWAYS use the RefID format (@e1, @e2, etc.)  ✓ Required\n")
 
 	return builder.String()
 }

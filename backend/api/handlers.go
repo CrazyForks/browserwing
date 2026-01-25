@@ -4514,9 +4514,8 @@ func (h *Handler) ExecutorGetAccessibilitySnapshot(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":       true,
-		"snapshot":      snapshot,
-		"snapshot_text": snapshot.SerializeToSimpleText(),
+		"success":  true,
+		"snapshot": snapshot.SerializeToSimpleText(),
 	})
 }
 

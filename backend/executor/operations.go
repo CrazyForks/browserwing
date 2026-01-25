@@ -42,9 +42,30 @@ func (e *Executor) Navigate(ctx context.Context, url string, opts *NavigateOptio
 	// 获取或创建页面
 	logger.Info(ctx, "[Navigate] Getting active page...")
 	page := e.Browser.GetActivePage()
+	
+	// 检查 page 是否有效
+	needNewPage := false
 	if page == nil {
-		logger.Info(ctx, "[Navigate] No active page, creating new page...")
-		// 如果没有活动页面，通过 OpenPage 创建新页面（会自动导航）
+		logger.Info(ctx, "[Navigate] No active page")
+		needNewPage = true
+	} else {
+		// 检查 page 的 session 是否仍然有效
+		logger.Info(ctx, "[Navigate] Checking if existing page is still valid...")
+		checkCtx, checkCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer checkCancel()
+		
+		_, err := page.Context(checkCtx).Eval(`() => document.readyState`)
+		if err != nil {
+			logger.Warn(ctx, "[Navigate] Existing page session is invalid (error: %v), will create new page", err)
+			needNewPage = true
+		} else {
+			logger.Info(ctx, "[Navigate] Existing page is valid")
+		}
+	}
+	
+	if needNewPage {
+		logger.Info(ctx, "[Navigate] Creating new page...")
+		// 通过 OpenPage 创建新页面（会自动导航）
 		// 使用当前实例（传空字符串），norecord=true
 		err := e.Browser.OpenPage(url, "", "", true)
 		if err != nil {
@@ -70,21 +91,46 @@ func (e *Executor) Navigate(ctx context.Context, url string, opts *NavigateOptio
 	} else {
 		logger.Info(ctx, "[Navigate] Using existing page, navigating...")
 		// 如果已有活动页面，直接导航
-		err := page.Timeout(opts.Timeout).Navigate(url)
+		// 使用独立的 context，避免被之前的 context 取消影响
+		navCtx, navCancel := context.WithTimeout(context.Background(), opts.Timeout)
+		defer navCancel()
+		
+		err := page.Context(navCtx).Navigate(url)
 		if err != nil {
 			logger.Error(ctx, "[Navigate] Failed to navigate to page: %s", err.Error())
-			return &OperationResult{
-				Success:   false,
-				Error:     err.Error(),
-				Timestamp: time.Now(),
-			}, err
+			
+			// 如果是 session 错误，尝试重新创建 page
+			if isSessionError(err) {
+				logger.Warn(ctx, "[Navigate] Session error detected, retrying with new page...")
+				err := e.Browser.OpenPage(url, "", "", true)
+				if err != nil {
+					return &OperationResult{
+						Success:   false,
+						Error:     fmt.Sprintf("Navigation failed and retry failed: %s", err.Error()),
+						Timestamp: time.Now(),
+					}, err
+				}
+				page = e.Browser.GetActivePage()
+				logger.Info(ctx, "[Navigate] Retry successful with new page")
+			} else {
+				return &OperationResult{
+					Success:   false,
+					Error:     err.Error(),
+					Timestamp: time.Now(),
+				}, err
+			}
+		} else {
+			logger.Info(ctx, "[Navigate] Navigation completed")
 		}
-		logger.Info(ctx, "[Navigate] Navigation completed")
 	}
 
 	// 等待页面加载 - 使用 panic 恢复机制防止 rod 库内部错误
 	logger.Info(ctx, "[Navigate] Waiting for page load (condition: %s)...", opts.WaitUntil)
-	waitErr := safeWaitForPageLoad(ctx, page, opts.WaitUntil)
+	// 使用独立的 context 进行等待，避免被取消的 context 影响
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), opts.Timeout)
+	defer waitCancel()
+	
+	waitErr := safeWaitForPageLoad(waitCtx, page, opts.WaitUntil)
 	if waitErr != nil {
 		logger.Warn(ctx, "[Navigate] Wait for page load failed: %v (continuing anyway)", waitErr)
 		// 不返回错误,因为页面可能已经部分加载了,继续处理
@@ -1560,6 +1606,19 @@ func (e *Executor) GetNetworkRequests(ctx context.Context) (*OperationResult, er
 	}, nil
 }
 
+// isSessionError 检查是否是 CDP session 错误
+func isSessionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// CDP session 相关的错误
+	return strings.Contains(errStr, "Session with given id not found") ||
+		strings.Contains(errStr, "Session closed") ||
+		strings.Contains(errStr, "Target closed") ||
+		strings.Contains(errStr, "-32001")
+}
+
 // safeWaitForPageLoad 安全地等待页面加载,捕获可能的 panic
 func safeWaitForPageLoad(ctx context.Context, page *rod.Page, waitUntil string) (err error) {
 	// 使用 defer recover 来捕获 rod 库可能产生的 panic
@@ -1569,6 +1628,9 @@ func safeWaitForPageLoad(ctx context.Context, page *rod.Page, waitUntil string) 
 		}
 	}()
 
+	// 使用传入的 context 来控制超时
+	page = page.Context(ctx)
+	
 	// 根据不同的等待条件执行相应的等待操作
 	switch waitUntil {
 	case "domcontentloaded", "load":
