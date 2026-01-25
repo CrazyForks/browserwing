@@ -2,7 +2,7 @@
 
 # 应用信息
 APP_NAME = browserwing
-VERSION = "v0.0.2"
+VERSION = "v1.0.0"
 BUILD_TIME = $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 GO_VERSION = $(shell go version | awk '{print $$3}')
 

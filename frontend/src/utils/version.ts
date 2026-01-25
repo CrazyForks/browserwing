@@ -1,5 +1,5 @@
 // 当前版本号
-export const CURRENT_VERSION = '0.0.1'
+export const CURRENT_VERSION = '1.0.0'
 
 // 版本信息接口
 export interface VersionInfo {

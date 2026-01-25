@@ -56,7 +56,7 @@ func NewMCPServer(storage *storage.BoltDB, browserMgr *browser.Manager) *MCPServ
 	// 创建 mcp-go server
 	s.mcpServer = server.NewMCPServer(
 		"browserwing",
-		"0.0.1",
+		"1.0.0",
 		server.WithToolCapabilities(true),
 	)
 
@@ -699,7 +699,7 @@ func (s *MCPServer) callExecutorTool(ctx context.Context, name string, arguments
 		}
 
 		return response, nil
-	
+
 	// 保持向后兼容
 	case "browser_get_semantic_tree":
 		simple := true
@@ -997,21 +997,21 @@ func (s *MCPServer) callExecutorTool(ctx context.Context, name string, arguments
 
 	case "browser_tabs":
 		action, _ := arguments["action"].(string)
-		
+
 		opts := &executor.TabsOptions{
 			Action: executor.TabsAction(action),
 		}
-		
+
 		// 处理 URL 参数
 		if url, ok := arguments["url"].(string); ok {
 			opts.URL = url
 		}
-		
+
 		// 处理 index 参数
 		if indexFloat, ok := arguments["index"].(float64); ok {
 			opts.Index = int(indexFloat)
 		}
-		
+
 		result, err := s.executor.Tabs(ctx, opts)
 		if err != nil {
 			return nil, err
@@ -1030,40 +1030,40 @@ func (s *MCPServer) callExecutorTool(ctx context.Context, name string, arguments
 			Submit:  false,
 			Timeout: 10 * time.Second,
 		}
-		
+
 		// 处理 fields 参数
 		if fieldsData, ok := arguments["fields"].([]interface{}); ok {
 			for _, fieldData := range fieldsData {
 				if fieldMap, ok := fieldData.(map[string]interface{}); ok {
 					field := executor.FormField{}
-					
+
 					if name, ok := fieldMap["name"].(string); ok {
 						field.Name = name
 					}
-					
+
 					if value, ok := fieldMap["value"]; ok {
 						field.Value = value
 					}
-					
+
 					if fieldType, ok := fieldMap["type"].(string); ok {
 						field.Type = fieldType
 					}
-					
+
 					opts.Fields = append(opts.Fields, field)
 				}
 			}
 		}
-		
+
 		// 处理 submit 参数
 		if submit, ok := arguments["submit"].(bool); ok {
 			opts.Submit = submit
 		}
-		
+
 		// 处理 timeout 参数
 		if timeoutFloat, ok := arguments["timeout"].(float64); ok {
 			opts.Timeout = time.Duration(timeoutFloat) * time.Second
 		}
-		
+
 		result, err := s.executor.FillForm(ctx, opts)
 		if err != nil {
 			return nil, err
