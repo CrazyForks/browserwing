@@ -17,10 +17,10 @@ type AgentClient struct {
 
 // AgentSession Agent 会话
 type AgentSession struct {
-	ID        string          `json:"id"`
-	Messages  []AgentMessage  `json:"messages"`
-	CreatedAt int64           `json:"created_at"`
-	UpdatedAt int64           `json:"updated_at"`
+	ID        string         `json:"id"`
+	Messages  []AgentMessage `json:"messages"`
+	CreatedAt int64          `json:"created_at"`
+	UpdatedAt int64          `json:"updated_at"`
 }
 
 // AgentMessage Agent 消息
@@ -54,7 +54,7 @@ func (ac *AgentClient) CreateSession(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("agent manager not initialized")
 	}
 
-	session := ac.client.agentManager.CreateSession()
+	session := ac.client.agentManager.CreateSession("")
 	if session == nil {
 		return "", fmt.Errorf("failed to create session")
 	}
@@ -109,7 +109,7 @@ func (ac *AgentClient) ListSessions(ctx context.Context) ([]*AgentSession, error
 	}
 
 	sessions := ac.client.agentManager.ListSessions()
-	
+
 	// 转换为 SDK 模型
 	result := make([]*AgentSession, 0, len(sessions))
 	for _, session := range sessions {
@@ -166,7 +166,7 @@ func (ac *AgentClient) SendMessage(ctx context.Context, sessionID, message strin
 
 	// 创建通道接收流式响应
 	streamChan := make(chan agent.StreamChunk, 10)
-	
+
 	// 启动发送消息的 goroutine
 	errChan := make(chan error, 1)
 	go func() {
@@ -210,7 +210,7 @@ func (ac *AgentClient) SendMessageStream(ctx context.Context, sessionID, message
 
 	// 创建通道接收流式响应
 	streamChan := make(chan agent.StreamChunk, 10)
-	
+
 	// 启动发送消息的 goroutine
 	errChan := make(chan error, 1)
 	go func() {
@@ -266,7 +266,7 @@ func (ac *AgentClient) SendMessageStreamReader(ctx context.Context, sessionID, m
 
 		// 创建通道接收流式响应
 		streamChan := make(chan agent.StreamChunk, 10)
-		
+
 		// 启动发送消息的 goroutine
 		errChan := make(chan error, 1)
 		go func() {

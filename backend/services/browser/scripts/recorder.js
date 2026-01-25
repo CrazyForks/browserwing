@@ -57,7 +57,7 @@ if (window.__browserwingRecorder__) {
 		
 		var extractBtn = document.createElement('button');
 		extractBtn.id = '__browserwing_extract_btn__';
-		extractBtn.style.cssText = 'flex:1;padding:8px 14px;background:white;color:#334155;border:1.5px solid rgba(0,0,0,0.12);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 1px 3px rgba(0,0,0,0.04);';
+		extractBtn.style.cssText = 'flex:1;padding:8px 14px;background:white;color:#334155;border:1.5px solid rgba(0,0,0,0.12);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 1px 3px rgba(0,0,0,0.04);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
 		extractBtn.textContent = '{{DATA_EXTRACT}}';
 		extractBtn.onmouseover = function() {
 			if (!window.__extractMode__) {
@@ -96,7 +96,7 @@ if (window.__browserwingRecorder__) {
 		
 		var aiExtractBtn = document.createElement('button');
 		aiExtractBtn.id = '__browserwing_ai_extract_btn__';
-		aiExtractBtn.style.cssText = 'flex:1;padding:8px 14px;background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);color:white;border:1.5px solid rgba(0,0,0,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(15,23,42,0.2), 0 1px 3px rgba(0,0,0,0.1);';
+		aiExtractBtn.style.cssText = 'flex:1;padding:8px 14px;background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);color:white;border:1.5px solid rgba(0,0,0,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(15,23,42,0.2), 0 1px 3px rgba(0,0,0,0.1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
 		aiExtractBtn.textContent = '{{AI_EXTRACT}}';
 		aiExtractBtn.onmouseover = function() {
 			this.style.background = 'linear-gradient(135deg,#0f172a 0%,#020617 100%)';
@@ -116,7 +116,7 @@ if (window.__browserwingRecorder__) {
 		
 		var aiFormFillBtn = document.createElement('button');
 		aiFormFillBtn.id = '__browserwing_ai_formfill_btn__';
-		aiFormFillBtn.style.cssText = 'flex:1;padding:8px 14px;background:linear-gradient(135deg,#64748b 0%,#475569 100%);color:white;border:1.5px solid rgba(0,0,0,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(71,85,105,0.2), 0 1px 3px rgba(0,0,0,0.1);';
+		aiFormFillBtn.style.cssText = 'flex:1;padding:8px 14px;background:linear-gradient(135deg,#64748b 0%,#475569 100%);color:white;border:1.5px solid rgba(0,0,0,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(71,85,105,0.2), 0 1px 3px rgba(0,0,0,0.1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
 		aiFormFillBtn.textContent = '{{AI_FORMFILL}}';
 		aiFormFillBtn.onmouseover = function() {
 			this.style.background = 'linear-gradient(135deg,#475569 0%,#334155 100%)';
