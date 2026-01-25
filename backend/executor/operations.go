@@ -319,12 +319,23 @@ func (e *Executor) Type(ctx context.Context, identifier string, text string, opt
 		}
 	}
 
+	// 同时返回当前的页面可访问性快照
+	snapshot, err := e.GetAccessibilitySnapshot(ctx)
+	if err != nil {
+		logger.Error(ctx, "Failed to get accessibility snapshot: %s", err.Error())
+	}
+	var accessibilitySnapshotText string
+	if snapshot != nil {
+		accessibilitySnapshotText = snapshot.SerializeToSimpleText()
+	}
+
 	return &OperationResult{
 		Success:   true,
 		Message:   fmt.Sprintf("Successfully typed into element: %s", identifier),
 		Timestamp: time.Now(),
 		Data: map[string]interface{}{
-			"text": text,
+			"text":          text,
+			"semantic_tree": accessibilitySnapshotText,
 		},
 	}, nil
 }
@@ -374,12 +385,23 @@ func (e *Executor) Select(ctx context.Context, identifier string, value string, 
 		}, err
 	}
 
+	// 同时返回当前的页面可访问性快照
+	snapshot, err := e.GetAccessibilitySnapshot(ctx)
+	if err != nil {
+		logger.Error(ctx, "Failed to get accessibility snapshot: %s", err.Error())
+	}
+	var accessibilitySnapshotText string
+	if snapshot != nil {
+		accessibilitySnapshotText = snapshot.SerializeToSimpleText()
+	}
+
 	return &OperationResult{
 		Success:   true,
 		Message:   fmt.Sprintf("Successfully selected option: %s", value),
 		Timestamp: time.Now(),
 		Data: map[string]interface{}{
-			"value": value,
+			"value":         value,
+			"semantic_tree": accessibilitySnapshotText,
 		},
 	}, nil
 }

@@ -199,8 +199,8 @@ func (r *MCPToolRegistry) registerNavigateTool() error {
 func (r *MCPToolRegistry) registerClickTool() error {
 	tool := mcpgo.NewTool(
 		"browser_click",
-		mcpgo.WithDescription("Click an element on the page. Can use CSS selector, XPath, or element label/text."),
-		mcpgo.WithString("identifier", mcpgo.Required(), mcpgo.Description("Element identifier: CSS selector, XPath, label, or text")),
+		mcpgo.WithDescription("Click an element on the page. Returns success message and updated page snapshot with RefIDs. Can use RefID (@e1), CSS selector, XPath, or element label/text."),
+		mcpgo.WithString("identifier", mcpgo.Required(), mcpgo.Description("Element identifier: RefID (@e1 from snapshot), CSS selector, XPath, label, or text")),
 		mcpgo.WithBoolean("wait_visible", mcpgo.Description("Wait for element to be visible (default: true)")),
 	)
 
@@ -229,8 +229,8 @@ func (r *MCPToolRegistry) registerClickTool() error {
 		responseText = result.Message
 
 		// 如果有可访问性快照数据，添加到响应中
-		if accessibilitySnapshot, ok := result.Data["accessibility_snapshot"].(string); ok && accessibilitySnapshot != "" {
-			responseText += "\n\nAccessibility Snapshot:\n" + accessibilitySnapshot
+		if snapshot, ok := result.Data["semantic_tree"].(string); ok && snapshot != "" {
+			responseText += "\n\n" + snapshot
 		}
 
 		return mcpgo.NewToolResultText(responseText), nil
@@ -244,8 +244,8 @@ func (r *MCPToolRegistry) registerClickTool() error {
 func (r *MCPToolRegistry) registerTypeTool() error {
 	tool := mcpgo.NewTool(
 		"browser_type",
-		mcpgo.WithDescription("Type text into an input field. Can use CSS selector, XPath, or element label."),
-		mcpgo.WithString("identifier", mcpgo.Required(), mcpgo.Description("Element identifier: CSS selector, XPath, label, or placeholder")),
+		mcpgo.WithDescription("Type text into an input field. Returns success message and updated page snapshot with RefIDs. Can use RefID (@e3), CSS selector, XPath, or element label."),
+		mcpgo.WithString("identifier", mcpgo.Required(), mcpgo.Description("Element identifier: RefID (@e3 from snapshot), CSS selector, XPath, label, or placeholder")),
 		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Text to type")),
 		mcpgo.WithBoolean("clear", mcpgo.Description("Clear existing text before typing (default: true)")),
 	)
@@ -270,7 +270,16 @@ func (r *MCPToolRegistry) registerTypeTool() error {
 			return mcpgo.NewToolResultError(err.Error()), nil
 		}
 
-		return mcpgo.NewToolResultText(result.Message), nil
+		// 构建返回文本，包含消息和可访问性快照
+		var responseText string
+		responseText = result.Message
+
+		// 如果有可访问性快照数据，添加到响应中
+		if snapshot, ok := result.Data["semantic_tree"].(string); ok && snapshot != "" {
+			responseText += "\n\n" + snapshot
+		}
+
+		return mcpgo.NewToolResultText(responseText), nil
 	}
 
 	r.mcpServer.AddTool(tool, handler)
@@ -281,8 +290,8 @@ func (r *MCPToolRegistry) registerTypeTool() error {
 func (r *MCPToolRegistry) registerSelectTool() error {
 	tool := mcpgo.NewTool(
 		"browser_select",
-		mcpgo.WithDescription("Select an option from a dropdown menu"),
-		mcpgo.WithString("identifier", mcpgo.Required(), mcpgo.Description("Select element identifier")),
+		mcpgo.WithDescription("Select an option from a dropdown menu. Returns success message and updated page snapshot with RefIDs."),
+		mcpgo.WithString("identifier", mcpgo.Required(), mcpgo.Description("Select element identifier: RefID (@e5 from snapshot), CSS selector, or XPath")),
 		mcpgo.WithString("value", mcpgo.Required(), mcpgo.Description("Option value or text to select")),
 	)
 
@@ -301,7 +310,16 @@ func (r *MCPToolRegistry) registerSelectTool() error {
 			return mcpgo.NewToolResultError(err.Error()), nil
 		}
 
-		return mcpgo.NewToolResultText(result.Message), nil
+		// 构建返回文本，包含消息和可访问性快照
+		var responseText string
+		responseText = result.Message
+
+		// 如果有可访问性快照数据，添加到响应中
+		if snapshot, ok := result.Data["semantic_tree"].(string); ok && snapshot != "" {
+			responseText += "\n\n" + snapshot
+		}
+
+		return mcpgo.NewToolResultText(responseText), nil
 	}
 
 	r.mcpServer.AddTool(tool, handler)
