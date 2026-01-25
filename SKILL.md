@@ -39,7 +39,7 @@ curl -X GET 'http://{host}/api/v1/executor/help?command=extract'
 
 ### 2. Get Accessibility Snapshot
 
-**CRITICAL:** Always call this after navigation to understand page structure and get element indices.
+**CRITICAL:** Always call this after navigation to understand page structure and get element RefIDs.
 
 ```bash
 curl -X GET 'http://{host}/api/v1/executor/snapshot'
@@ -49,15 +49,16 @@ curl -X GET 'http://{host}/api/v1/executor/snapshot'
 ```json
 {
   "success": true,
-  "snapshot_text": "Clickable Element [1]: Login Button\nInput Element [1]: Email\nInput Element [2]: Password"
+  "snapshot_text": "Clickable Elements:\n  @e1 Login (role: button)\n  @e2 Sign Up (role: link)\n\nInput Elements:\n  @e3 Email (role: textbox) [placeholder: your@email.com]\n  @e4 Password (role: textbox)"
 }
 ```
 
 **Use Cases:**
 - Understand what interactive elements are on the page
-- Get element indices for reliable identification
-- See element labels and roles
+- Get element RefIDs (@e1, @e2, etc.) for precise identification
+- See element labels, roles, and attributes
 - The accessibility tree is cleaner than raw DOM and better for understanding page structure
+- RefIDs are stable references that work reliably across page changes
 
 ### 3. Common Operations
 
@@ -72,15 +73,19 @@ curl -X POST 'http://{host}/api/v1/executor/navigate' \
 ```bash
 curl -X POST 'http://{host}/api/v1/executor/click' \
   -H 'Content-Type: application/json' \
-  -d '{"identifier": "[1]"}'
+  -d '{"identifier": "@e1"}'
 ```
-**Identifier formats:** `[1]`, `#button-id`, `.class-name`, `Login` (text), `Clickable Element [1]`
+**Identifier formats:** 
+- **RefID (Recommended):** `@e1`, `@e2` (from snapshot)
+- **CSS Selector:** `#button-id`, `.class-name`
+- **XPath:** `//button[@type='submit']`
+- **Text:** `Login` (text content)
 
 #### Type Text
 ```bash
 curl -X POST 'http://{host}/api/v1/executor/type' \
   -H 'Content-Type: application/json' \
-  -d '{"identifier": "Input Element [1]", "text": "user@example.com"}'
+  -d '{"identifier": "@e3", "text": "user@example.com"}'
 ```
 
 #### Extract Data
@@ -108,8 +113,8 @@ curl -X POST 'http://{host}/api/v1/executor/batch' \
   -d '{
     "operations": [
       {"type": "navigate", "params": {"url": "https://example.com"}, "stop_on_error": true},
-      {"type": "click", "params": {"identifier": "[1]"}, "stop_on_error": true},
-      {"type": "type", "params": {"identifier": "[1]", "text": "query"}, "stop_on_error": true}
+      {"type": "click", "params": {"identifier": "@e1"}, "stop_on_error": true},
+      {"type": "type", "params": {"identifier": "@e3", "text": "query"}, "stop_on_error": true}
     ]
   }'
 ```
@@ -311,9 +316,9 @@ curl -X POST 'http://{host}/api/v1/executor/fill-form' \
 
 2. **Navigate:** Use `POST /navigate` to open the target webpage.
 
-3. **Analyze page:** Call `GET /semantic-tree` to understand page structure and get element indices.
+3. **Analyze page:** Call `GET /snapshot` to understand page structure and get element RefIDs.
 
-4. **Interact:** Use element indices (like `[1]`, `Input Element [1]`) or CSS selectors to:
+4. **Interact:** Use element RefIDs (like `@e1`, `@e2`) or CSS selectors to:
    - Click elements: `POST /click`
    - Input text: `POST /type`
    - Select options: `POST /select`
@@ -338,15 +343,15 @@ curl -X POST 'http://{host}/api/v1/executor/navigate' \
 
 2. Get page structure to find search input:
 ```bash
-curl -X GET 'http://{host}/api/v1/executor/semantic-tree'
+curl -X GET 'http://{host}/api/v1/executor/snapshot'
 ```
-Response shows: `Input Element [1]: Search Box`
+Response shows: `@e3 Search (role: textbox) [placeholder: Search...]`
 
 3. Type search query:
 ```bash
 curl -X POST 'http://{host}/api/v1/executor/type' \
   -H 'Content-Type: application/json' \
-  -d '{"identifier": "Input Element [1]", "text": "laptop"}'
+  -d '{"identifier": "@e3", "text": "laptop"}'
 ```
 
 4. Press Enter to submit:
@@ -391,8 +396,8 @@ Found 15 results for 'laptop':
 - `POST /reload` - Reload current page
 
 ### Element Interaction
-- `POST /click` - Click element (supports: CSS selector, semantic index `[1]`, text content)
-- `POST /type` - Type text into input (supports: `Input Element [1]`, CSS selector)
+- `POST /click` - Click element (supports: RefID `@e1`, CSS selector, XPath, text content)
+- `POST /type` - Type text into input (supports: RefID `@e3`, CSS selector, XPath)
 - `POST /select` - Select dropdown option
 - `POST /hover` - Hover over element
 - `POST /wait` - Wait for element state (visible, hidden, enabled)
@@ -407,7 +412,7 @@ Found 15 results for 'laptop':
 - `GET /page-content` - Get full HTML
 
 ### Page Analysis
-- `GET /semantic-tree` - Get semantic tree (⭐ **ALWAYS call after navigation**)
+- `GET /snapshot` - Get accessibility snapshot with RefIDs (⭐ **ALWAYS call after navigation**)
 - `GET /clickable-elements` - Get all clickable elements
 - `GET /input-elements` - Get all input elements
 
@@ -422,10 +427,12 @@ Found 15 results for 'laptop':
 
 You can identify elements using:
 
-1. **Semantic Index (Recommended):** `[1]`, `[2]`, `Clickable Element [1]`, `Input Element [2]`
-   - Most reliable method
-   - Get indices from `/semantic-tree` endpoint
-   - Example: `"identifier": "[1]"` or `"identifier": "Input Element [1]"`
+1. **RefID (Recommended):** `@e1`, `@e2`, `@e3`
+   - Most reliable method - stable across page changes
+   - Get RefIDs from `/snapshot` endpoint
+   - Valid for 5 minutes after snapshot
+   - Example: `"identifier": "@e1"`
+   - Works with multi-strategy fallback for robustness
 
 2. **CSS Selector:** `#id`, `.class`, `button[type="submit"]`
    - Standard CSS selectors
@@ -449,16 +456,17 @@ You can identify elements using:
 - Ensure browser is started (if not, it will auto-start on first operation)
 
 **During automation:**
-- **Always call `/semantic-tree` after navigation** to get page structure
-- **Prefer semantic indices** (like `[1]`) over CSS selectors for reliability
+- **Always call `/snapshot` after navigation** to get page structure and RefIDs
+- **Prefer RefIDs** (like `@e1`) over CSS selectors for reliability and stability
 - **Use `/wait`** for dynamic content that loads asynchronously
 - **Check element states** before interaction (visible, enabled)
+- **Re-snapshot after page changes** to get updated RefIDs
 - **Use `/batch`** for multiple sequential operations to improve efficiency
 
 **Error handling:**
 - If operation fails, check element identifier and try different format
 - For timeout errors, increase timeout value
-- If element not found, call `/semantic-tree` again to refresh page structure
+- If element not found, call `/snapshot` again to refresh page structure and get new RefIDs
 - Explain errors clearly to user with suggested solutions
 
 **Data extraction:**
@@ -484,31 +492,34 @@ POST http://{host}/api/v1/executor/navigate
 
 **Step 2:** Get page structure
 ```bash
-GET http://{host}/api/v1/executor/semantic-tree
+GET http://{host}/api/v1/executor/snapshot
 ```
 Response:
 ```
-Input Element [1]: Username
-Input Element [2]: Password
-Clickable Element [1]: Login Button
+Clickable Elements:
+  @e1 Login (role: button)
+
+Input Elements:
+  @e2 Username (role: textbox)
+  @e3 Password (role: textbox)
 ```
 
 **Step 3:** Enter username
 ```bash
 POST http://{host}/api/v1/executor/type
-{"identifier": "Input Element [1]", "text": "john"}
+{"identifier": "@e2", "text": "john"}
 ```
 
 **Step 4:** Enter password
 ```bash
 POST http://{host}/api/v1/executor/type
-{"identifier": "Input Element [2]", "text": "secret123"}
+{"identifier": "@e3", "text": "secret123"}
 ```
 
 **Step 5:** Click login button
 ```bash
 POST http://{host}/api/v1/executor/click
-{"identifier": "Clickable Element [1]"}
+{"identifier": "@e1"}
 ```
 
 **Step 6:** Wait for login success (optional)
@@ -576,10 +587,10 @@ curl -X POST 'http://{host}/api/v1/executor/batch' \
 
 ### Form Filling
 1. Navigate to form page
-2. Get semantic tree to find input elements
-3. Use `/type` for each field: `Input Element [1]`, `Input Element [2]`, etc.
+2. Get snapshot to find input elements and their RefIDs
+3. Use `/type` for each field: `@e1`, `@e2`, etc.
 4. Use `/select` for dropdowns
-5. Click submit button
+5. Click submit button using its RefID
 
 ### Data Scraping
 1. Navigate to target page
@@ -597,10 +608,10 @@ curl -X POST 'http://{host}/api/v1/executor/batch' \
 
 ### Login Automation
 1. Navigate to login page
-2. Get semantic tree
-3. Type username: `Input Element [1]`
-4. Type password: `Input Element [2]`
-5. Click login button: `Clickable Element [1]`
+2. Get snapshot to find input fields and button RefIDs
+3. Type username: `@e2`
+4. Type password: `@e3`
+5. Click login button: `@e1`
 6. Wait for success indicator
 
 ## Important Notes
@@ -616,7 +627,7 @@ curl -X POST 'http://{host}/api/v1/executor/batch' \
 ## Troubleshooting
 
 **Element not found:**
-- Call `/semantic-tree` to see available elements
+- Call `/snapshot` to see available elements and their RefIDs
 - Try different identifier format (semantic index, CSS selector, text)
 - Check if page has finished loading
 
@@ -640,13 +651,13 @@ GET http://{host}/api/v1/executor/help
 POST http://{host}/api/v1/executor/navigate {"url": "..."}
 
 # Get page structure
-GET http://{host}/api/v1/executor/semantic-tree
+GET http://{host}/api/v1/executor/snapshot
 
 # Click element
-POST http://{host}/api/v1/executor/click {"identifier": "[1]"}
+POST http://{host}/api/v1/executor/click {"identifier": "@e1"}
 
 # Type text
-POST http://{host}/api/v1/executor/type {"identifier": "[1]", "text": "..."}
+POST http://{host}/api/v1/executor/type {"identifier": "@e3", "text": "..."}
 
 # Extract data
 POST http://{host}/api/v1/executor/extract {"selector": "...", "fields": [...], "multiple": true}

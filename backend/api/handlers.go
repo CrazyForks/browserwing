@@ -3317,8 +3317,8 @@ func (h *Handler) ExecutorHelp(c *gin.Context) {
 				"identifier": map[string]interface{}{
 					"type":        "string",
 					"required":    true,
-					"description": "Element identifier: CSS selector, XPath, text, semantic index ([1], Clickable Element [1])",
-					"example":     "#button-id or [1]",
+					"description": "Element identifier: RefID (@e1, @e2 from snapshot), CSS selector, XPath, or text content",
+					"example":     "@e1 or #button-id",
 				},
 				"wait_visible": map[string]interface{}{
 					"type":        "boolean",
@@ -4831,7 +4831,7 @@ func generateExecutorSkillMD(host string) string {
 
 	// 2. 获取可访问性快照
 	sb.WriteString("### 2. Get Accessibility Snapshot\n\n")
-	sb.WriteString("**CRITICAL:** Always call this after navigation to understand page structure and get element indices.\n\n")
+	sb.WriteString("**CRITICAL:** Always call this after navigation to understand page structure and get element RefIDs.\n\n")
 	sb.WriteString("```bash\n")
 	sb.WriteString(fmt.Sprintf("curl -X GET 'http://%s/api/v1/executor/snapshot'\n", host))
 	sb.WriteString("```\n\n")
@@ -4839,14 +4839,15 @@ func generateExecutorSkillMD(host string) string {
 	sb.WriteString("```json\n")
 	sb.WriteString("{\n")
 	sb.WriteString("  \"success\": true,\n")
-	sb.WriteString("  \"snapshot_text\": \"Clickable Element [1]: Login Button\\nInput Element [1]: Email\\nInput Element [2]: Password\"\n")
+	sb.WriteString("  \"snapshot_text\": \"Clickable Elements:\\n  @e1 Login (role: button)\\n  @e2 Sign Up (role: link)\\n\\nInput Elements:\\n  @e3 Email (role: textbox) [placeholder: your@email.com]\\n  @e4 Password (role: textbox)\"\n")
 	sb.WriteString("}\n")
 	sb.WriteString("```\n\n")
 	sb.WriteString("**Use Cases:**\n")
 	sb.WriteString("- Understand what interactive elements are on the page\n")
-	sb.WriteString("- Get element indices for reliable identification\n")
-	sb.WriteString("- See element labels and roles\n")
-	sb.WriteString("- The accessibility tree is cleaner than raw DOM and better for LLMs\n\n")
+	sb.WriteString("- Get element RefIDs (@e1, @e2, etc.) for precise identification\n")
+	sb.WriteString("- See element labels, roles, and attributes\n")
+	sb.WriteString("- The accessibility tree is cleaner than raw DOM and better for LLMs\n")
+	sb.WriteString("- RefIDs are stable references that work reliably across page changes\n\n")
 
 	// 3. 主要操作端点
 	sb.WriteString("### 3. Common Operations\n\n")
@@ -4864,16 +4865,20 @@ func generateExecutorSkillMD(host string) string {
 	sb.WriteString("```bash\n")
 	sb.WriteString(fmt.Sprintf("curl -X POST 'http://%s/api/v1/executor/click' \\\n", host))
 	sb.WriteString("  -H 'Content-Type: application/json' \\\n")
-	sb.WriteString("  -d '{\"identifier\": \"[1]\"}'\n")
+	sb.WriteString("  -d '{\"identifier\": \"@e1\"}'\n")
 	sb.WriteString("```\n")
-	sb.WriteString("**Identifier formats:** `[1]`, `#button-id`, `.class-name`, `Login` (text), `Clickable Element [1]`\n\n")
+	sb.WriteString("**Identifier formats:**\n")
+	sb.WriteString("- **RefID (Recommended):** `@e1`, `@e2` (from snapshot)\n")
+	sb.WriteString("- **CSS Selector:** `#button-id`, `.class-name`\n")
+	sb.WriteString("- **XPath:** `//button[@type='submit']`\n")
+	sb.WriteString("- **Text:** `Login` (text content)\n\n")
 
 	// Type
 	sb.WriteString("#### Type Text\n")
 	sb.WriteString("```bash\n")
 	sb.WriteString(fmt.Sprintf("curl -X POST 'http://%s/api/v1/executor/type' \\\n", host))
 	sb.WriteString("  -H 'Content-Type: application/json' \\\n")
-	sb.WriteString("  -d '{\"identifier\": \"Input Element [1]\", \"text\": \"user@example.com\"}'\n")
+	sb.WriteString("  -d '{\"identifier\": \"@e3\", \"text\": \"user@example.com\"}'\n")
 	sb.WriteString("```\n\n")
 
 	// Extract
@@ -4904,8 +4909,8 @@ func generateExecutorSkillMD(host string) string {
 	sb.WriteString("  -d '{\n")
 	sb.WriteString("    \"operations\": [\n")
 	sb.WriteString("      {\"type\": \"navigate\", \"params\": {\"url\": \"https://example.com\"}, \"stop_on_error\": true},\n")
-	sb.WriteString("      {\"type\": \"click\", \"params\": {\"identifier\": \"[1]\"}, \"stop_on_error\": true},\n")
-	sb.WriteString("      {\"type\": \"type\", \"params\": {\"identifier\": \"[1]\", \"text\": \"query\"}, \"stop_on_error\": true}\n")
+	sb.WriteString("      {\"type\": \"click\", \"params\": {\"identifier\": \"@e1\"}, \"stop_on_error\": true},\n")
+	sb.WriteString("      {\"type\": \"type\", \"params\": {\"identifier\": \"@e3\", \"text\": \"query\"}, \"stop_on_error\": true}\n")
 	sb.WriteString("    ]\n")
 	sb.WriteString("  }'\n")
 	sb.WriteString("```\n\n")
@@ -4915,8 +4920,8 @@ func generateExecutorSkillMD(host string) string {
 	sb.WriteString("**Step-by-step workflow:**\n\n")
 	sb.WriteString("1. **Discover commands:** Call `GET /help` to see all available operations and their parameters (do this first if unsure).\n\n")
 	sb.WriteString("2. **Navigate:** Use `POST /navigate` to open the target webpage.\n\n")
-	sb.WriteString("3. **Analyze page:** Call `GET /snapshot` to understand page structure and get element indices.\n\n")
-	sb.WriteString("4. **Interact:** Use element indices (like `[1]`, `Input Element [1]`) or CSS selectors to:\n")
+	sb.WriteString("3. **Analyze page:** Call `GET /snapshot` to understand page structure and get element RefIDs.\n\n")
+	sb.WriteString("4. **Interact:** Use element RefIDs (like `@e1`, `@e2`) or CSS selectors to:\n")
 	sb.WriteString("   - Click elements: `POST /click`\n")
 	sb.WriteString("   - Input text: `POST /type`\n")
 	sb.WriteString("   - Select options: `POST /select`\n")
@@ -4940,13 +4945,13 @@ func generateExecutorSkillMD(host string) string {
 	sb.WriteString("```bash\n")
 	sb.WriteString(fmt.Sprintf("curl -X GET 'http://%s/api/v1/executor/snapshot'\n", host))
 	sb.WriteString("```\n")
-	sb.WriteString("Response shows: `Input Element [1]: Search Box`\n\n")
+	sb.WriteString("Response shows: `@e3 Search (role: textbox) [placeholder: Search...]`\n\n")
 
 	sb.WriteString("3. Type search query:\n")
 	sb.WriteString("```bash\n")
 	sb.WriteString(fmt.Sprintf("curl -X POST 'http://%s/api/v1/executor/type' \\\n", host))
 	sb.WriteString("  -H 'Content-Type: application/json' \\\n")
-	sb.WriteString("  -d '{\"identifier\": \"Input Element [1]\", \"text\": \"laptop\"}'\n")
+	sb.WriteString("  -d '{\"identifier\": \"@e3\", \"text\": \"laptop\"}'\n")
 	sb.WriteString("```\n\n")
 
 	sb.WriteString("4. Press Enter to submit:\n")

@@ -342,7 +342,7 @@ func (e *Executor) SelectByLabel(ctx context.Context, label string, value string
 
 // ========== 页面信息获取 ==========
 
-// GetPageInfo 获取页面信息
+// GetPageInfo 获取页面信息（增强版，参考 playwright-mcp 和 agent-browser）
 func (e *Executor) GetPageInfo(ctx context.Context) (*OperationResult, error) {
 	page := e.Browser.GetActivePage()
 	if page == nil {
@@ -353,23 +353,139 @@ func (e *Executor) GetPageInfo(ctx context.Context) (*OperationResult, error) {
 		}, fmt.Errorf("no active page")
 	}
 
+	// 收集所有信息
+	pageInfo := make(map[string]interface{})
+
+	// 1. 基本信息
 	info, err := page.Info()
-	if err != nil {
-		return &OperationResult{
-			Success:   false,
-			Error:     err.Error(),
-			Timestamp: time.Now(),
-		}, err
+	if err == nil {
+		pageInfo["url"] = info.URL
+		pageInfo["title"] = info.Title
+	}
+
+	// 2. 视口大小
+	viewport, err := page.Eval(`() => ({
+		width: window.innerWidth,
+		height: window.innerHeight,
+		devicePixelRatio: window.devicePixelRatio
+	})`)
+	if err == nil && viewport != nil {
+		pageInfo["viewport"] = viewport.Value.Val()
+	}
+
+	// 3. 文档状态
+	docState, err := page.Eval(`() => ({
+		readyState: document.readyState,
+		documentElement: !!document.documentElement,
+		body: !!document.body
+	})`)
+	if err == nil && docState != nil {
+		pageInfo["documentState"] = docState.Value.Val()
+	}
+
+	// 4. 元素统计（类似 agent-browser 的 get count）
+	stats, err := page.Eval(`() => ({
+		links: document.querySelectorAll('a').length,
+		buttons: document.querySelectorAll('button, [role="button"]').length,
+		inputs: document.querySelectorAll('input, textarea, select').length,
+		images: document.querySelectorAll('img').length,
+		scripts: document.querySelectorAll('script').length,
+		forms: document.querySelectorAll('form').length,
+		iframes: document.querySelectorAll('iframe').length,
+		headings: document.querySelectorAll('h1, h2, h3, h4, h5, h6').length
+	})`)
+	if err == nil && stats != nil {
+		pageInfo["elementCounts"] = stats.Value.Val()
+	}
+
+	// 5. 滚动信息
+	scrollInfo, err := page.Eval(`() => ({
+		scrollX: window.scrollX || window.pageXOffset || 0,
+		scrollY: window.scrollY || window.pageYOffset || 0,
+		scrollWidth: document.documentElement.scrollWidth,
+		scrollHeight: document.documentElement.scrollHeight,
+		isScrollable: document.documentElement.scrollHeight > window.innerHeight
+	})`)
+	if err == nil && scrollInfo != nil {
+		pageInfo["scroll"] = scrollInfo.Value.Val()
+	}
+
+	// 6. 元数据（Open Graph, meta tags）
+	metadata, err := page.Eval(`() => {
+		const getMeta = (name) => {
+			const meta = document.querySelector('meta[name="' + name + '"], meta[property="' + name + '"]');
+			return meta ? meta.content : null;
+		};
+		return {
+			description: getMeta('description'),
+			keywords: getMeta('keywords'),
+			author: getMeta('author'),
+			ogTitle: getMeta('og:title'),
+			ogDescription: getMeta('og:description'),
+			ogImage: getMeta('og:image'),
+			ogUrl: getMeta('og:url'),
+			ogType: getMeta('og:type'),
+			twitterCard: getMeta('twitter:card'),
+			twitterTitle: getMeta('twitter:title'),
+			twitterDescription: getMeta('twitter:description'),
+			twitterImage: getMeta('twitter:image'),
+			viewport: getMeta('viewport'),
+			charset: document.characterSet || document.charset
+		};
+	}`)
+	if err == nil && metadata != nil {
+		pageInfo["metadata"] = metadata.Value.Val()
+	}
+
+	// 7. 性能信息（页面加载时间）
+	perfInfo, err := page.Eval(`() => {
+		if (!window.performance || !window.performance.timing) {
+			return null;
+		}
+		const timing = window.performance.timing;
+		return {
+			navigationStart: timing.navigationStart,
+			domContentLoadedTime: timing.domContentLoadedEventEnd - timing.navigationStart,
+			loadTime: timing.loadEventEnd - timing.navigationStart,
+			domInteractive: timing.domInteractive - timing.navigationStart,
+			domComplete: timing.domComplete - timing.navigationStart
+		};
+	}`)
+	if err == nil && perfInfo != nil && perfInfo.Value.Val() != nil {
+		pageInfo["performance"] = perfInfo.Value.Val()
+	}
+
+	// 8. 交互元素快速统计（可点击、可输入）
+	interactiveInfo, err := page.Eval(`() => {
+		const clickableElements = document.querySelectorAll('a, button, [role="button"], [onclick], [role="link"]');
+		const inputElements = document.querySelectorAll('input, textarea, select, [role="textbox"], [role="combobox"]');
+		return {
+			clickableElements: clickableElements.length,
+			inputElements: inputElements.length,
+			visibleInputs: Array.from(inputElements).filter(el => {
+				const style = window.getComputedStyle(el);
+				return style.display !== 'none' && style.visibility !== 'hidden';
+			}).length
+		};
+	}`)
+	if err == nil && interactiveInfo != nil {
+		pageInfo["interactive"] = interactiveInfo.Value.Val()
+	}
+
+	// 9. 页面语言和方向
+	langInfo, err := page.Eval(`() => ({
+		language: document.documentElement.lang || null,
+		direction: document.documentElement.dir || 'ltr'
+	})`)
+	if err == nil && langInfo != nil {
+		pageInfo["language"] = langInfo.Value.Val()
 	}
 
 	return &OperationResult{
 		Success:   true,
-		Message:   "Successfully retrieved page info",
+		Message:   "Successfully retrieved enhanced page info",
 		Timestamp: time.Now(),
-		Data: map[string]interface{}{
-			"url":   info.URL,
-			"title": info.Title,
-		},
+		Data:      pageInfo,
 	}, nil
 }
 

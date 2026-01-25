@@ -390,7 +390,19 @@ func (r *MCPToolRegistry) registerAccessibilitySnapshotTool() error {
 func (r *MCPToolRegistry) registerGetPageInfoTool() error {
 	tool := mcpgo.NewTool(
 		"browser_get_page_info",
-		mcpgo.WithDescription("Get information about the current page (URL, title, etc.)"),
+		mcpgo.WithDescription(`Get comprehensive information about the current page.
+
+Returns detailed page metadata including:
+- Basic: URL, title, viewport size
+- Structure: Element counts (links, buttons, inputs, images, etc.)
+- Metadata: Open Graph tags, meta descriptions, keywords
+- Performance: Page load timing, DOM ready time
+- Interactive: Clickable and input element statistics
+- State: Document ready state, scroll position
+- Language: Page language and text direction
+
+This is useful for understanding page structure before taking actions.
+For interactive elements, use browser_snapshot to get refs for precise interaction.`),
 	)
 
 	handler := func(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -901,7 +913,7 @@ func GetExecutorToolsMetadata() []ToolMetadata {
 		},
 		{
 			Name:        "browser_get_page_info",
-			Description: "Get page information",
+			Description: "Get comprehensive page information (URL, title, element counts, metadata, performance, etc.)",
 			Category:    "Analysis",
 			Parameters:  []ToolParameter{},
 		},
