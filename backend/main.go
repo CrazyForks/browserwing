@@ -61,9 +61,6 @@ func main() {
 	// 避免在终端输出调试信息
 	zerolog.SetGlobalLevel(zerolog.Disabled)
 
-	// 如果需要保留 zerolog 日志但输出到文件，可以重定向到日志文件
-	// 但这里我们选择完全禁用，因为已经有自己的日志系统
-
 	// 优先级: 命令行参数 > 环境变量 > 配置文件
 	if *port != "" {
 		cfg.Server.Port = *port

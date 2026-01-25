@@ -888,11 +888,12 @@ const (
 
 // TaskComplexity 任务复杂度评估结果
 type TaskComplexity struct {
-	NeedTools   bool   `json:"need_tools"`   // 是否需要使用工具
-	ComplexMode string `json:"complex_mode"` // simple, medium, complex, none
-	Reasoning   string `json:"reasoning"`    // 评估理由
-	Confidence  string `json:"confidence"`   // 置信度: high, medium, low
-	Explanation string `json:"explanation"`  // 对用户的解释
+	NeedTools      bool   `json:"need_tools"`                // 是否需要使用工具
+	ComplexMode    string `json:"complex_mode"`              // simple, medium, complex, none
+	Reasoning      string `json:"reasoning"`                 // 评估理由
+	Confidence     string `json:"confidence"`                // 置信度: high, medium, low
+	Explanation    string `json:"explanation"`               // 对用户的解释
+	DirectResponse string `json:"direct_response,omitempty"` // ✨ 如果不需要工具，直接包含完整回复内容
 }
 
 // generateGreeting 生成友好的开场白回复
@@ -1007,10 +1008,19 @@ Response format (JSON only, no explanation, no markdown):
   "complex_mode": "simple/medium/complex",
   "reasoning": "Brief explanation",
   "confidence": "high/medium/low",
-  "explanation": "Short user-friendly explanation in same language as user"
+  "explanation": "Short user-friendly explanation in same language as user",
+  "direct_response": "REQUIRED if need_tools is false: Complete answer"
 }
 
-If need_tools is false, set complex_mode to "none".`, userMessage)
+**IMPORTANT:**
+- If need_tools is false:
+  * Set complex_mode to "none"
+  * YOU MUST include "direct_response" with the complete answer
+  * The "direct_response" should be natural and in the same language as user
+
+- If need_tools is true:
+  * Set complex_mode appropriately (simple/medium/complex)
+  * DO NOT include "direct_response"`, userMessage)
 
 	// 创建评估上下文
 	evalCtx := multitenancy.WithOrgID(ctx, "browserwing")
@@ -1032,7 +1042,7 @@ If need_tools is false, set complex_mode to "none".`, userMessage)
 	}
 
 	logger.Info(ctx, "[TaskEval] Raw response: %s", response)
-	
+
 	// 🔍 调试：输出原始响应的前 200 个字符
 	if len(response) > 200 {
 		logger.Info(ctx, "[TaskEval] Raw response preview (first 200 chars): %s...", response[:200])
@@ -1043,7 +1053,7 @@ If need_tools is false, set complex_mode to "none".`, userMessage)
 	response = strings.ReplaceAll(response, "```json", "")
 	response = strings.ReplaceAll(response, "```", "")
 	response = strings.TrimSpace(response)
-	
+
 	// 🔍 调试：输出清理后的响应
 	logger.Info(ctx, "[TaskEval] Cleaned response: %s", response)
 	if response == "" {
@@ -1071,7 +1081,7 @@ If need_tools is false, set complex_mode to "none".`, userMessage)
 			Explanation: "评估结果解析失败，直接回复",
 		}, nil
 	}
-	
+
 	// 🔍 调试：检查解析后的值
 	logger.Info(ctx, "[TaskEval] Parsed result: NeedTools=%v, ComplexMode='%s', Reasoning='%s'",
 		complexity.NeedTools,
@@ -1090,12 +1100,12 @@ If need_tools is false, set complex_mode to "none".`, userMessage)
 			Explanation: "评估返回格式错误，直接回复",
 		}, nil
 	}
-	
+
 	logger.Info(ctx, "[TaskEval] Task evaluated as %s (confidence: %s): %s",
 		complexity.ComplexMode,
 		complexity.Confidence,
 		complexity.Reasoning)
-	
+
 	// 🔍 调试日志：输出完整的评估结果
 	logger.Info(ctx, "[TaskEval] ✓ Evaluation result: NeedTools=%v, ComplexMode=%s, Confidence=%s",
 		complexity.NeedTools,
@@ -1191,7 +1201,7 @@ func (am *AgentManager) SendMessage(ctx context.Context, sessionID, userMessage 
 			Explanation: "评估失败，直接回复",
 		}
 	}
-	
+
 	// 🔍 调试日志：输出评估结果和判断逻辑
 	logger.Info(ctx, "[SendMessage] Complexity evaluation: NeedTools=%v, ComplexMode=%s, Message='%s'",
 		complexity.NeedTools,
@@ -1201,19 +1211,48 @@ func (am *AgentManager) SendMessage(ctx context.Context, sessionID, userMessage 
 	// 如果不需要工具，直接用 LLM 生成回复
 	if !complexity.NeedTools {
 		logger.Info(ctx, "[SendMessage] ✓ Taking direct response path (no tools needed)")
-		logger.Info(ctx, "[DirectLLM] Task doesn't need tools, using direct LLM response: %s", complexity.Reasoning)
-		
-		// 使用 SimpleAgent 但不调用工具（直接回复）
-		// 创建多租户上下文
-		directCtx := multitenancy.WithOrgID(ctx, "browserwing")
-		directCtx = context.WithValue(directCtx, memory.ConversationIDKey, sessionID)
-		
-		// 使用 SimpleAgent 的流式运行（不会调用工具因为任务简单）
-		streamEvents, err := agentInstances.SimpleAgent.RunStream(directCtx, userMessage)
-		if err != nil {
-			logger.Warn(ctx, "Direct response failed: %v, falling back to agent with tools", err)
-			complexity.NeedTools = true // 降级到使用带工具的 agent
+		logger.Info(ctx, "[DirectLLM] Task doesn't need tools: %s", complexity.Reasoning)
+
+		// ✨ 优化：如果评估结果中包含直接回复，直接使用，无需再调用 LLM
+		if complexity.DirectResponse != "" {
+			logger.Info(ctx, "[DirectLLM] ⚡ Using direct response from evaluation (1 LLM call): %d chars", len(complexity.DirectResponse))
+
+			// 将回复内容分段流式发送（模拟流式效果，提升用户体验）
+			assistantMsg.Content = complexity.DirectResponse
+			chunkSize := 20 // 每次发送 20 个字符
+			for i := 0; i < len(complexity.DirectResponse); i += chunkSize {
+				end := i + chunkSize
+				if end > len(complexity.DirectResponse) {
+					end = len(complexity.DirectResponse)
+				}
+				chunk := complexity.DirectResponse[i:end]
+				streamChan <- StreamChunk{
+					Type:      "message",
+					Content:   chunk,
+					MessageID: assistantMsg.ID,
+				}
+				// 小延迟，模拟自然的打字效果
+				time.Sleep(10 * time.Millisecond)
+			}
+
+			logger.Info(ctx, "[DirectLLM] ✓ Direct response completed (from evaluation)")
+
 		} else {
+			// 降级：如果没有直接回复，使用 SimpleAgent 生成（2次 LLM 调用）
+			logger.Warn(ctx, "[DirectLLM] No direct response in evaluation, falling back to SimpleAgent (2 LLM calls)")
+
+			// 创建多租户上下文
+			directCtx := multitenancy.WithOrgID(ctx, "browserwing")
+			directCtx = context.WithValue(directCtx, memory.ConversationIDKey, sessionID)
+
+			// 使用 SimpleAgent 的流式运行
+			streamEvents, err := agentInstances.SimpleAgent.RunStream(directCtx, userMessage)
+			if err != nil {
+				logger.Warn(ctx, "Direct response failed: %v, falling back to agent with tools", err)
+				complexity.NeedTools = true // 降级到使用带工具的 agent
+				goto needTools              // 跳转到需要工具的流程
+			}
+
 			// 处理流式事件
 			for event := range streamEvents {
 				switch event.Type {
@@ -1238,38 +1277,41 @@ func (am *AgentManager) SendMessage(ctx context.Context, sessionID, userMessage 
 					logger.Info(ctx, "[DirectLLM] ✓ Direct response completed: %d chars", len(assistantMsg.Content))
 				}
 			}
-			
-			// 完成消息
-			streamChan <- StreamChunk{
-				Type:      "done",
-				MessageID: assistantMsg.ID,
-			}
-			
-			// 保存助手消息
-			am.mu.Lock()
-			session.Messages = append(session.Messages, assistantMsg)
-			session.UpdatedAt = time.Now()
-			am.mu.Unlock()
-			
-			dbAssistantMsg := &models.AgentMessage{
-				ID:        assistantMsg.ID,
-				SessionID: sessionID,
-				Role:      assistantMsg.Role,
-				Content:   assistantMsg.Content,
-				Timestamp: assistantMsg.Timestamp,
-				ToolCalls: []map[string]interface{}{},
-			}
-			if err := am.db.SaveAgentMessage(dbAssistantMsg); err != nil {
-				logger.Warn(am.ctx, "Failed to save assistant message to database: %v", err)
-			}
-			
-			return nil
 		}
+
+		// 完成消息
+		streamChan <- StreamChunk{
+			Type:      "done",
+			MessageID: assistantMsg.ID,
+		}
+
+		// 保存助手消息
+		am.mu.Lock()
+		session.Messages = append(session.Messages, assistantMsg)
+		session.UpdatedAt = time.Now()
+		am.mu.Unlock()
+
+		dbAssistantMsg := &models.AgentMessage{
+			ID:        assistantMsg.ID,
+			SessionID: sessionID,
+			Role:      assistantMsg.Role,
+			Content:   assistantMsg.Content,
+			Timestamp: assistantMsg.Timestamp,
+			ToolCalls: []map[string]interface{}{},
+		}
+		if err := am.db.SaveAgentMessage(dbAssistantMsg); err != nil {
+			logger.Warn(am.ctx, "Failed to save assistant message to database: %v", err)
+		}
+
+		return nil
 	}
+
+needTools:
+	// 需要工具的流程标签
 
 	// 需要工具，根据评估结果选择合适的 Agent
 	logger.Info(ctx, "[SendMessage] ✓ Taking agent path (tools needed)")
-	
+
 	var ag *agent.Agent
 	switch complexity.ComplexMode {
 	case ComplexModeComplex:
@@ -1512,9 +1554,10 @@ processingComplete:
 
 	// 更新会话时间戳
 	dbSession := &models.AgentSession{
-		ID:        sessionID,
-		CreatedAt: session.CreatedAt,
-		UpdatedAt: session.UpdatedAt,
+		ID:          sessionID,
+		LLMConfigID: session.LLMConfigID, // ✅ 保留 LLMConfigID
+		CreatedAt:   session.CreatedAt,
+		UpdatedAt:   session.UpdatedAt,
 	}
 	if err := am.db.SaveAgentSession(dbSession); err != nil {
 		logger.Warn(am.ctx, "Failed to update session timestamp: %v", err)
