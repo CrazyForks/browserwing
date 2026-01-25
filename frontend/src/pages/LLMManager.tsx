@@ -112,7 +112,7 @@ export default function LLMManager() {
       })
       showToast(t('llm.messages.addSuccess'), 'success')
     } catch (error: any) {
-      showToast(t('llm.messages.addError') + ': ' + (error.response?.data?.error || error.message), 'error')
+      showToast(t('llm.messages.addError') + ': ' + t(error.response?.data?.error || error.message), 'error')
     }
   }
 
@@ -123,7 +123,7 @@ export default function LLMManager() {
       setEditingId(null)
       showToast(t('llm.messages.updateSuccess'), 'success')
     } catch (error: any) {
-      showToast(t('llm.messages.updateError') + ': ' + (error.response?.data?.error || error.message), 'error')
+      showToast(t('llm.messages.updateError') + ': ' + t(error.response?.data?.error || error.message), 'error')
     }
   }
 
@@ -135,7 +135,7 @@ export default function LLMManager() {
       await loadConfigs()
       showToast(t('llm.messages.deleteSuccess'), 'success')
     } catch (error: any) {
-      showToast(t('llm.messages.deleteError') + ': ' + (error.response?.data?.error || error.message), 'error')
+      showToast(t('llm.messages.deleteError') + ': ' + t(error.response?.data?.error || error.message), 'error')
     } finally {
       setDeleteConfirm({ show: false, configId: null })
     }
@@ -153,7 +153,7 @@ export default function LLMManager() {
       })
       showToast(t(result.data.message), result.data.success ? 'success' : 'error')
     } catch (error: any) {
-      showToast(t('llm.messages.testError') + ': ' + (error.response?.data?.error || error.message), 'error')
+      showToast(t('llm.messages.testError') + ': ' + t(error.response?.data?.error || error.message), 'error')
     } finally {
       setTestingId(null)
     }

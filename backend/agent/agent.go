@@ -251,10 +251,11 @@ func (t *MCPTool) Parameters() map[string]interfaces.ParameterSpec {
 
 // AgentInstances 存储不同类型的 Agent 实例
 type AgentInstances struct {
-	SimpleAgent  *agent.Agent // 简单任务 Agent (maxIterations=3)
-	MediumAgent  *agent.Agent // 中等任务 Agent (maxIterations=7)
-	ComplexAgent *agent.Agent // 复杂任务 Agent (maxIterations=12)
-	EvalAgent    *agent.Agent // 任务评估 Agent (maxIterations=1)
+	SimpleAgent  *agent.Agent   // 简单任务 Agent (maxIterations=3)
+	MediumAgent  *agent.Agent   // 中等任务 Agent (maxIterations=7)
+	ComplexAgent *agent.Agent   // 复杂任务 Agent (maxIterations=12)
+	EvalAgent    *agent.Agent   // 任务评估 Agent (maxIterations=1)
+	LLMClient    interfaces.LLM // 会话专用的 LLM client
 }
 
 // AgentManager Agent 管理器
@@ -808,6 +809,7 @@ func (am *AgentManager) createAgentInstances(llmClient interfaces.LLM) (*AgentIn
 		MediumAgent:  mediumAgent,
 		ComplexAgent: complexAgent,
 		EvalAgent:    evalAgent,
+		LLMClient:    llmClient, // 保存 LLM client 引用
 	}, nil
 }
 
@@ -865,7 +867,8 @@ const (
 
 // TaskComplexity 任务复杂度评估结果
 type TaskComplexity struct {
-	ComplexMode string `json:"complex_mode"` // simple, medium, complex
+	NeedTools   bool   `json:"need_tools"`   // 是否需要使用工具
+	ComplexMode string `json:"complex_mode"` // simple, medium, complex, none
 	Reasoning   string `json:"reasoning"`    // 评估理由
 	Confidence  string `json:"confidence"`   // 置信度: high, medium, low
 	Explanation string `json:"explanation"`  // 对用户的解释
@@ -927,49 +930,66 @@ func (am *AgentManager) evaluateTaskComplexity(ctx context.Context, sessionID, u
 	}
 
 	// 构建评估提示词
-	evalPrompt := fmt.Sprintf(`Analyze the following user request and estimate the number of tool calls required, then classify the task complexity.
+	evalPrompt := fmt.Sprintf(`Analyze the following user request and determine:
+1. Does it need to use tools (browser automation, web search, calculations, etc.)?
+2. If yes, estimate the number of tool calls and classify complexity
 
 User request: "%s"
 
-Classification Guidelines (based on estimated tool calls):
+**STEP 1: Determine if tools are needed**
+
+NO TOOLS NEEDED (need_tools: false):
+- Greetings, casual chat, small talk
+- General knowledge questions that LLM can answer directly
+- Asking for explanations, definitions, or advice
+- Examples:
+  * "Hi" / "Hello" / "你好" → Just greeting
+  * "What is AI?" → LLM knowledge
+  * "How do I learn programming?" → LLM advice
+  * "Tell me a joke" → LLM generation
+  * "What's the capital of France?" → LLM knowledge
+
+TOOLS NEEDED (need_tools: true):
+- Real-time information (weather, news, stock prices)
+- Web browsing, clicking, form filling
+- Searching the web
+- Calculations, data processing
+- Examples:
+  * "Search for today's trending GitHub repositories" → need web_search
+  * "Open Baidu and search for AI news" → need browser automation
+  * "What's the weather now?" → need real-time data
+
+**STEP 2: If tools needed, classify complexity**
 
 **SIMPLE (1-3 tool calls):**
-- Single information queries (no browser automation)
-- Direct API calls or searches
+- Single tool call tasks
+- Direct web searches or calculations
 - Examples:
-  * "Search for today's trending GitHub repositories" → 1 call (web_search)
-  * "What's the weather in Beijing?" → 1 call (web_search)
-  * "Calculate the result of 123 * 456" → 1 call (calculate)
+  * "Search for trending GitHub repos" → 1 call (web_search)
+  * "Calculate 123 * 456" → 1 call (calculate)
 
 **MEDIUM (4-7 tool calls):**
 - Browser automation with multiple steps
-- Multi-step information gathering and processing
 - Examples:
-  * "Open Baidu, search for 'AI news', click the first result" → 4-5 calls (navigate, type, press_key, click)
-  * "Go to GitHub trending page and get the top 3 projects" → 4-5 calls (navigate, get_semantic_tree, extract)
-  * "Fill a simple form and submit" → 4-6 calls (navigate, type×3, click)
+  * "Open Baidu, search for 'AI news', click first result" → 4-5 calls
+  * "Fill a simple form and submit" → 4-6 calls
 
 **COMPLEX (8+ tool calls):**
 - Multi-page workflows with data processing
-- Complex form filling with validation
-- Comprehensive data extraction and analysis
 - Examples:
-  * "Compare prices across 3 e-commerce sites and create a summary" → 12+ calls
-  * "Automate a complete user registration flow with email verification" → 10+ calls
-  * "Scrape data from multiple pages and generate a report" → 15+ calls
-
-**Important Notes:**
-- Browser automation tasks (navigate, type, click, etc.) are usually MEDIUM or COMPLEX, rarely SIMPLE
-- Count each browser operation separately: navigate=1, type=1, click=1, get_semantic_tree=1
-- If the task mentions "open browser", "search", "click", it's likely 4+ tool calls (MEDIUM)
+  * "Compare prices across 3 sites" → 12+ calls
+  * "Automate complete registration flow" → 10+ calls
 
 Response format (JSON only, no explanation, no markdown):
 {
+  "need_tools": true/false,
   "complex_mode": "simple/medium/complex",
-  "reasoning": "Brief explanation with estimated tool call count",
+  "reasoning": "Brief explanation",
   "confidence": "high/medium/low",
-  "explanation": "Short user-friendly explanation"
-}`, userMessage)
+  "explanation": "Short user-friendly explanation in same language as user"
+}
+
+If need_tools is false, set complex_mode to "none".`, userMessage)
 
 	// 创建评估上下文
 	evalCtx := multitenancy.WithOrgID(ctx, "browserwing")
@@ -1084,52 +1104,6 @@ func (am *AgentManager) SendMessage(ctx context.Context, sessionID, userMessage 
 		return fmt.Errorf("failed to create agent instances: %w", err)
 	}
 
-	// 立即生成并发送友好的开场白，让用户不要等待（作为独立消息）
-	greeting, err := am.generateGreeting(ctx, sessionID, userMessage, agentInstances)
-	if err != nil {
-		logger.Warn(ctx, "Failed to generate greeting: %v", err)
-		greeting = "Got it, let me help you with that."
-	}
-
-	// 创建并发送 greeting 消息（独立的消息）
-	greetingMsg := ChatMessage{
-		ID:        uuid.New().String(),
-		Role:      "assistant",
-		Content:   greeting,
-		Timestamp: time.Now(),
-		ToolCalls: []*ToolCall{},
-	}
-
-	// 流式发送 greeting
-	streamChan <- StreamChunk{
-		Type:      "message",
-		Content:   greeting,
-		MessageID: greetingMsg.ID,
-	}
-	streamChan <- StreamChunk{
-		Type:      "done",
-		MessageID: greetingMsg.ID,
-	}
-
-	logger.Info(ctx, "[Greeting] Sent greeting to user: %s", greeting)
-
-	// 保存 greeting 消息
-	am.mu.Lock()
-	session.Messages = append(session.Messages, greetingMsg)
-	session.UpdatedAt = time.Now()
-	am.mu.Unlock()
-
-	dbGreetingMsg := &models.AgentMessage{
-		ID:        greetingMsg.ID,
-		SessionID: sessionID,
-		Role:      greetingMsg.Role,
-		Content:   greetingMsg.Content,
-		Timestamp: greetingMsg.Timestamp,
-	}
-	if err := am.db.SaveAgentMessage(dbGreetingMsg); err != nil {
-		logger.Warn(am.ctx, "Failed to save greeting message to database: %v", err)
-	}
-
 	// 创建主要的助手消息（用于工具调用和最终回复）
 	assistantMsg := ChatMessage{
 		ID:        uuid.New().String(),
@@ -1151,6 +1125,7 @@ func (am *AgentManager) SendMessage(ctx context.Context, sessionID, userMessage 
 	if err != nil {
 		logger.Warn(ctx, "Failed to evaluate task complexity: %v, using simple agent", err)
 		complexity = &TaskComplexity{
+			NeedTools:   true,
 			ComplexMode: ComplexModeSimple,
 			Reasoning:   "Evaluation error, defaulting to simple",
 			Confidence:  "low",
@@ -1158,7 +1133,75 @@ func (am *AgentManager) SendMessage(ctx context.Context, sessionID, userMessage 
 		}
 	}
 
-	// 根据评估结果选择合适的 Agent
+	// 如果不需要工具，直接用 LLM 生成回复
+	if !complexity.NeedTools {
+		logger.Info(ctx, "[DirectLLM] Task doesn't need tools, using direct LLM response: %s", complexity.Reasoning)
+		
+		// 使用 SimpleAgent 但不调用工具（直接回复）
+		// 创建多租户上下文
+		directCtx := multitenancy.WithOrgID(ctx, "browserwing")
+		directCtx = context.WithValue(directCtx, memory.ConversationIDKey, sessionID)
+		
+		// 使用 SimpleAgent 的流式运行（不会调用工具因为任务简单）
+		streamEvents, err := agentInstances.SimpleAgent.RunStream(directCtx, userMessage)
+		if err != nil {
+			logger.Warn(ctx, "Direct response failed: %v, falling back to agent with tools", err)
+			complexity.NeedTools = true // 降级到使用带工具的 agent
+		} else {
+			// 处理流式事件
+			for event := range streamEvents {
+				switch event.Type {
+				case interfaces.AgentEventContent:
+					// 文本内容
+					assistantMsg.Content += event.Content
+					streamChan <- StreamChunk{
+						Type:      "message",
+						Content:   event.Content,
+						MessageID: assistantMsg.ID,
+					}
+				case interfaces.AgentEventError:
+					// 错误
+					logger.Warn(ctx, "Direct response error: %s", event.Content)
+					streamChan <- StreamChunk{
+						Type:  "error",
+						Error: event.Content,
+					}
+					return fmt.Errorf("direct response error: %s", event.Content)
+				case interfaces.AgentEventComplete:
+					// 完成
+					logger.Info(ctx, "[DirectLLM] ✓ Direct response completed: %d chars", len(assistantMsg.Content))
+				}
+			}
+			
+			// 完成消息
+			streamChan <- StreamChunk{
+				Type:      "done",
+				MessageID: assistantMsg.ID,
+			}
+			
+			// 保存助手消息
+			am.mu.Lock()
+			session.Messages = append(session.Messages, assistantMsg)
+			session.UpdatedAt = time.Now()
+			am.mu.Unlock()
+			
+			dbAssistantMsg := &models.AgentMessage{
+				ID:        assistantMsg.ID,
+				SessionID: sessionID,
+				Role:      assistantMsg.Role,
+				Content:   assistantMsg.Content,
+				Timestamp: assistantMsg.Timestamp,
+				ToolCalls: []map[string]interface{}{},
+			}
+			if err := am.db.SaveAgentMessage(dbAssistantMsg); err != nil {
+				logger.Warn(am.ctx, "Failed to save assistant message to database: %v", err)
+			}
+			
+			return nil
+		}
+	}
+
+	// 需要工具，根据评估结果选择合适的 Agent
 	var ag *agent.Agent
 	switch complexity.ComplexMode {
 	case ComplexModeComplex:

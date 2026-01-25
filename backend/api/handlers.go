@@ -775,6 +775,10 @@ func (h *Handler) CreateLLMConfig(c *gin.Context) {
 		return
 	}
 
+	if req.Provider == "ollama" {
+		req.APIKey = "ollama"
+	}
+
 	// 使用 name 作为 ID
 	req.ID = req.Name
 	req.CreatedAt = time.Now()

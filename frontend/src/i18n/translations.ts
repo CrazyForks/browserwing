@@ -640,6 +640,7 @@ export const translations = {
     'agentChat.noSession': '选择或创建一个会话开始对话',
     'agentChat.copyMessage': '复制信息',
     'agentChat.selectModel': '选择模型',
+    'agentChat.defaultModel': '默认模型',
     'agentChat.sendMessageFailed': '发送消息失败，请重试',
     'agentChat.copyFailed': '复制失败，请手动复制',
     'agentChat.mcp': 'MCP',

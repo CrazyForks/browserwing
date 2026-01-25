@@ -109,6 +109,13 @@ export default function AgentChat() {
         new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
       )
       setSessions(sessions)
+      
+      // 调试日志：输出会话的 LLM 配置
+      console.log('[AgentChat] 加载的会话:', sessions.map((s: ChatSession) => ({
+        id: s.id,
+        llm_config_id: s.llm_config_id,
+        messages: s.messages?.length || 0
+      })))
     } catch (error) {
       console.error('加载会话失败:', error)
     }
@@ -154,6 +161,13 @@ export default function AgentChat() {
       const configs = data.configs || []
       setLlmConfigs(configs)
       
+      // 调试日志：输出 LLM 配置
+      console.log('[AgentChat] 加载的 LLM 配置:', configs.map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        model: c.model,
+        is_active: c.is_active
+      })))
     } catch (error) {
       console.error('加载 LLM 配置失败:', error)
     }
@@ -669,11 +683,15 @@ export default function AgentChat() {
 
         <div className="flex items-center gap-4">
           {/* 显示当前会话使用的模型（只读） */}
-          {currentSession && currentSession.llm_config_id && (
+          {currentSession && (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-300">
               <Bot className="w-4 h-4" />
               <span>
-                {llmConfigs.find(c => c.id === currentSession.llm_config_id)?.model || '未知模型'}
+                {currentSession.llm_config_id 
+                  ? (llmConfigs.find(c => c.id === currentSession.llm_config_id)?.model 
+                     || llmConfigs.find(c => c.name === currentSession.llm_config_id)?.model 
+                     || `${currentSession.llm_config_id.substring(0, 20)}...`)
+                  : t('agentChat.defaultModel') || '默认模型'}
               </span>
             </div>
           )}
