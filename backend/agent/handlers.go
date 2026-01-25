@@ -24,7 +24,14 @@ func NewHandler(manager *AgentManager) *Handler {
 
 // CreateSession 创建新会话
 func (h *Handler) CreateSession(c *gin.Context) {
-	session := h.manager.CreateSession()
+	var req struct {
+		LLMConfigID string `json:"llm_config_id"` // LLM 配置 ID
+	}
+
+	// 尝试读取请求体（可选）
+	c.ShouldBindJSON(&req)
+
+	session := h.manager.CreateSession(req.LLMConfigID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"session": session,

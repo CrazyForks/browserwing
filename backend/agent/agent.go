@@ -84,10 +84,11 @@ type ToolCall struct {
 
 // ChatSession 聊天会话
 type ChatSession struct {
-	ID        string        `json:"id"`
-	Messages  []ChatMessage `json:"messages"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
+	ID          string        `json:"id"`
+	LLMConfigID string        `json:"llm_config_id"` // 会话使用的LLM配置ID
+	Messages    []ChatMessage `json:"messages"`
+	CreatedAt   time.Time     `json:"created_at"`
+	UpdatedAt   time.Time     `json:"updated_at"`
 }
 
 // StreamChunk 流式响应数据块
@@ -607,6 +608,65 @@ func (am *AgentManager) ReloadLLM() error {
 	return am.LoadLLMFromDatabase()
 }
 
+// ensureAgentInstances 确保会话的 Agent 实例已创建（按需创建）
+func (am *AgentManager) ensureAgentInstances(sessionID, llmConfigID string) (*AgentInstances, error) {
+	// 先检查是否已存在
+	am.mu.RLock()
+	agentInstances, ok := am.agents[sessionID]
+	am.mu.RUnlock()
+
+	if ok && agentInstances != nil {
+		return agentInstances, nil
+	}
+
+	// 不存在，需要创建
+	logger.Info(am.ctx, "Creating Agent instances for session %s (LLM: %s)", sessionID, llmConfigID)
+
+	// 创建 LLM client（根据会话的 LLMConfigID）
+	var llmClient interfaces.LLM
+	if llmConfigID != "" {
+		// 使用会话指定的 LLM 配置
+		config, err := am.db.GetLLMConfig(llmConfigID)
+		if err != nil {
+			logger.Warn(am.ctx, "Failed to get LLM config %s: %v, using default", llmConfigID, err)
+			// 如果配置不存在，使用当前的默认配置
+			llmClient = am.llmClient
+		} else {
+			// 创建专门的 LLM client
+			llmClient, err = CreateLLMClient(config)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create LLM client from config %s: %w", llmConfigID, err)
+			}
+			logger.Info(am.ctx, "✓ Created LLM client for session %s: %s (%s)", sessionID, config.Model, config.Provider)
+		}
+	} else {
+		// 旧会话，没有指定 LLM，使用当前的默认配置
+		logger.Info(am.ctx, "Session %s has no LLM config, using default", sessionID)
+		llmClient = am.llmClient
+	}
+
+	if llmClient == nil {
+		return nil, fmt.Errorf("LLM client is not available")
+	}
+
+	// 创建 Agent 实例
+	agentInstances, err := am.createAgentInstances(llmClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create agent instances: %w", err)
+	}
+
+	// 保存到 map
+	am.mu.Lock()
+	am.agents[sessionID] = agentInstances
+	am.mu.Unlock()
+
+	tools := am.toolReg.List()
+	logger.Info(am.ctx, "✓ Created Agent instances for session %s on demand (simple: %d, medium: %d, complex: %d, eval: %d), tools: %d",
+		sessionID, maxIterationsSimple, maxIterationsMedium, maxIterationsComplex, maxIterationsEval, len(tools))
+
+	return agentInstances, nil
+}
+
 func (am *AgentManager) GetSystemPrompt() string {
 	dbSystemPrompt, err := am.db.GetPrompt(models.SystemPromptAIAgentID)
 	if err != nil {
@@ -673,30 +733,24 @@ func (am *AgentManager) loadSessionsFromDB() error {
 
 		// 创建会话对象
 		session := &ChatSession{
-			ID:        dbSession.ID,
-			Messages:  messages,
-			CreatedAt: dbSession.CreatedAt,
-			UpdatedAt: dbSession.UpdatedAt,
+			ID:          dbSession.ID,
+			LLMConfigID: dbSession.LLMConfigID, // 从数据库加载 LLM 配置 ID
+			Messages:    messages,
+			CreatedAt:   dbSession.CreatedAt,
+			UpdatedAt:   dbSession.UpdatedAt,
 		}
 
 		am.sessions[session.ID] = session
 
-		// 为会话创建 Agent 实例集合
-		if am.llmClient != nil {
-			agentInstances, err := am.createAgentInstances()
-			if err != nil {
-				logger.Warn(am.ctx, "Failed to create Agent instances for session %s: %v", session.ID, err)
-			} else {
-				am.agents[session.ID] = agentInstances
-			}
-		}
+		// ✅ 不再提前创建 Agent 实例，改为按需创建（lazy load）
+		logger.Info(am.ctx, "Loaded session %s with %d messages (LLM: %s)", session.ID, len(messages), session.LLMConfigID)
 	}
 
 	return nil
 }
 
-// createAgentInstance 创建指定 maxIterations 的 Agent 实例
-func (am *AgentManager) createAgentInstance(maxIter int) (*agent.Agent, error) {
+// createAgentInstance 创建指定 maxIterations 的 Agent 实例（使用指定的 LLM client）
+func (am *AgentManager) createAgentInstance(llmClient interfaces.LLM, maxIter int) (*agent.Agent, error) {
 	mem := memory.NewConversationBuffer()
 
 	// 获取LazyMCP配置
@@ -707,7 +761,7 @@ func (am *AgentManager) createAgentInstance(maxIter int) (*agent.Agent, error) {
 	}
 
 	ag, err := agent.NewAgent(
-		agent.WithLLM(am.llmClient),
+		agent.WithLLM(llmClient),
 		agent.WithMemory(mem),
 		agent.WithTools(am.toolReg.List()...),
 		agent.WithLazyMCPConfigs(lazyMCPConfigs),
@@ -723,28 +777,28 @@ func (am *AgentManager) createAgentInstance(maxIter int) (*agent.Agent, error) {
 	return ag, nil
 }
 
-// createAgentInstances 为会话创建所有类型的 Agent 实例
-func (am *AgentManager) createAgentInstances() (*AgentInstances, error) {
+// createAgentInstances 为会话创建所有类型的 Agent 实例（使用指定的 LLM client）
+func (am *AgentManager) createAgentInstances(llmClient interfaces.LLM) (*AgentInstances, error) {
 	// 创建简单任务 Agent
-	simpleAgent, err := am.createAgentInstance(maxIterationsSimple)
+	simpleAgent, err := am.createAgentInstance(llmClient, maxIterationsSimple)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create simple agent: %w", err)
 	}
 
 	// 创建中等任务 Agent
-	mediumAgent, err := am.createAgentInstance(maxIterationsMedium)
+	mediumAgent, err := am.createAgentInstance(llmClient, maxIterationsMedium)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create medium agent: %w", err)
 	}
 
 	// 创建复杂任务 Agent
-	complexAgent, err := am.createAgentInstance(maxIterationsComplex)
+	complexAgent, err := am.createAgentInstance(llmClient, maxIterationsComplex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create complex agent: %w", err)
 	}
 
 	// 创建任务评估 Agent
-	evalAgent, err := am.createAgentInstance(maxIterationsEval)
+	evalAgent, err := am.createAgentInstance(llmClient, maxIterationsEval)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create eval agent: %w", err)
 	}
@@ -758,41 +812,34 @@ func (am *AgentManager) createAgentInstances() (*AgentInstances, error) {
 }
 
 // CreateSession 创建新会话
-func (am *AgentManager) CreateSession() *ChatSession {
+func (am *AgentManager) CreateSession(llmConfigID string) *ChatSession {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
 	session := &ChatSession{
-		ID:        uuid.New().String(),
-		Messages:  []ChatMessage{},
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:          uuid.New().String(),
+		LLMConfigID: llmConfigID,
+		Messages:    []ChatMessage{},
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
 	am.sessions[session.ID] = session
 
 	// 保存到数据库
 	dbSession := &models.AgentSession{
-		ID:        session.ID,
-		CreatedAt: session.CreatedAt,
-		UpdatedAt: session.UpdatedAt,
+		ID:          session.ID,
+		LLMConfigID: llmConfigID,
+		CreatedAt:   session.CreatedAt,
+		UpdatedAt:   session.UpdatedAt,
 	}
 	if err := am.db.SaveAgentSession(dbSession); err != nil {
 		logger.Warn(am.ctx, "Failed to save session to database: %v", err)
 	}
 
-	// 为新会话创建 Agent 实例集合
-	if am.llmClient != nil {
-		agentInstances, err := am.createAgentInstances()
-		if err != nil {
-			logger.Warn(am.ctx, "Failed to create Agent instances for session %s: %v", session.ID, err)
-		} else {
-			am.agents[session.ID] = agentInstances
-			tools := am.toolReg.List()
-			logger.Info(am.ctx, "✓ Created Agent instances for session %s (simple: %d, complex: %d, eval: %d), tools count: %d",
-				session.ID, maxIterationsSimple, maxIterationsComplex, maxIterationsEval, len(tools))
-		}
-	}
+	// ✅ 不再提前创建 Agent 实例，改为在 SendMessage 时按需创建
+	logger.Info(am.ctx, "✓ Created session %s (LLM: %s), Agent instances will be created on demand",
+		session.ID, llmConfigID)
 
 	return session
 }
@@ -825,12 +872,8 @@ type TaskComplexity struct {
 }
 
 // generateGreeting 生成友好的开场白回复
-func (am *AgentManager) generateGreeting(ctx context.Context, sessionID, userMessage string) (string, error) {
-	am.mu.RLock()
-	agentInstances, ok := am.agents[sessionID]
-	am.mu.RUnlock()
-
-	if !ok || agentInstances == nil || agentInstances.EvalAgent == nil {
+func (am *AgentManager) generateGreeting(ctx context.Context, sessionID, userMessage string, agentInstances *AgentInstances) (string, error) {
+	if agentInstances == nil || agentInstances.EvalAgent == nil {
 		// 如果 Agent 不可用，返回默认的开场白
 		return "Got it, let me help you with that.", nil
 	}
@@ -1031,21 +1074,18 @@ func (am *AgentManager) SendMessage(ctx context.Context, sessionID, userMessage 
 		logger.Warn(am.ctx, "Failed to save user message to database: %v", err)
 	}
 
-	// 获取 Agent 实例集合
-	am.mu.RLock()
-	agentInstances, ok := am.agents[sessionID]
-	am.mu.RUnlock()
-
-	if !ok || agentInstances == nil {
+	// 确保 Agent 实例已创建（按需创建）
+	agentInstances, err := am.ensureAgentInstances(sessionID, session.LLMConfigID)
+	if err != nil {
 		streamChan <- StreamChunk{
 			Type:  "error",
-			Error: fmt.Sprintf("Agent instances for session %s are not initialized", sessionID),
+			Error: fmt.Sprintf("Failed to create Agent instances: %v", err),
 		}
-		return fmt.Errorf("agent instances for session %s are not initialized", sessionID)
+		return fmt.Errorf("failed to create agent instances: %w", err)
 	}
 
 	// 立即生成并发送友好的开场白，让用户不要等待（作为独立消息）
-	greeting, err := am.generateGreeting(ctx, sessionID, userMessage)
+	greeting, err := am.generateGreeting(ctx, sessionID, userMessage, agentInstances)
 	if err != nil {
 		logger.Warn(ctx, "Failed to generate greeting: %v", err)
 		greeting = "Got it, let me help you with that."

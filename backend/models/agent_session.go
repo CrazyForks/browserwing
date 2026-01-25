@@ -4,9 +4,10 @@ import "time"
 
 // AgentSession Agent 聊天会话
 type AgentSession struct {
-	ID        string    `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	LLMConfigID string    `json:"llm_config_id"` // 会话使用的LLM配置ID
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // AgentMessage Agent 聊天消息

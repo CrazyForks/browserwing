@@ -36,6 +36,7 @@ interface ChatMessage {
 
 interface ChatSession {
   id: string
+  llm_config_id: string  // 会话使用的LLM配置ID
   messages: ChatMessage[]
   created_at: string
   updated_at: string
@@ -61,14 +62,14 @@ export default function AgentChat() {
   const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('info')
   const [mcpStatus, setMcpStatus] = useState<any>(null)
   const [llmConfigs, setLlmConfigs] = useState<any[]>([])
-  const [selectedLlm, setSelectedLlm] = useState<string>('')
-  const [showLlmDropdown, setShowLlmDropdown] = useState(false)
+  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false)
+  const [selectedLlmForNewSession, setSelectedLlmForNewSession] = useState<string>('')
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set())
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const llmDropdownRef = useRef<HTMLDivElement>(null)
+  const newSessionDialogRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
   // 自动滚动到底部
@@ -153,13 +154,6 @@ export default function AgentChat() {
       const configs = data.configs || []
       setLlmConfigs(configs)
       
-      // 设置默认选中的 LLM
-      const defaultConfig = configs.find((c: any) => c.is_default && c.is_active)
-      if (defaultConfig) {
-        setSelectedLlm(defaultConfig.id)
-      } else if (configs.length > 0) {
-        setSelectedLlm(configs[0].id)
-      }
     } catch (error) {
       console.error('加载 LLM 配置失败:', error)
     }
@@ -175,28 +169,58 @@ export default function AgentChat() {
     return () => clearInterval(interval)
   }, [])
 
-  // 点击外部关闭 LLM 下拉框
+  // 点击外部关闭新建会话对话框
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (llmDropdownRef.current && !llmDropdownRef.current.contains(event.target as Node)) {
-        setShowLlmDropdown(false)
+      if (newSessionDialogRef.current && !newSessionDialogRef.current.contains(event.target as Node)) {
+        setShowNewSessionDialog(false)
       }
     }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
+    if (showNewSessionDialog) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showNewSessionDialog])
+
+  // 显示新建会话对话框
+  const showCreateSessionDialog = () => {
+    const activeConfigs = llmConfigs.filter(c => c && c.id && c.is_active)
+    
+    // 如果只有一个模型，直接创建会话
+    if (activeConfigs.length === 1) {
+      createSession(activeConfigs[0].id)
+      return
+    }
+    
+    // 如果有多个模型，显示选择对话框
+    if (activeConfigs.length > 1) {
+      setSelectedLlmForNewSession(activeConfigs[0].id)
+      setShowNewSessionDialog(true)
+      return
+    }
+    
+    // 如果没有模型，提示用户配置
+    showToastMessage(t('agentChat.noModelDesc'), 'error')
+  }
 
   // 创建新会话
-  const createSession = async () => {
+  const createSession = async (llmConfigId: string) => {
     try {
       const response = await authFetch('/api/v1/agent/sessions', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          llm_config_id: llmConfigId,
+        }),
       })
       const data = await response.json()
       const newSession = data.session
       
       setSessions([newSession, ...sessions])
       setCurrentSession(newSession)
+      setShowNewSessionDialog(false)
       
       showToastMessage(t('agentChat.sessionCreated'), 'success')
     } catch (error) {
@@ -277,9 +301,9 @@ export default function AgentChat() {
         },
         body: JSON.stringify({
           message: userMessage,
-          llm_config_id: selectedLlm || undefined, // 传递选中的 LLM ID
+          llm_config_id: currentSession.llm_config_id,
         }),
-        signal: abortControllerRef.current.signal, // 添加 abort signal
+        signal: abortControllerRef.current.signal,
       })
 
       if (!response.ok) {
@@ -644,64 +668,15 @@ export default function AgentChat() {
         </div>
 
         <div className="flex items-center gap-4">
-          {/* LLM 选择下拉框 */}
-          <div className="relative" ref={llmDropdownRef}>
-            <button
-              onClick={() => setShowLlmDropdown(!showLlmDropdown)}
-              className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm text-gray-700 dark:text-gray-300"
-              disabled={isStreaming}
-            >
+          {/* 显示当前会话使用的模型（只读） */}
+          {currentSession && currentSession.llm_config_id && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-300">
               <Bot className="w-4 h-4" />
               <span>
-                {llmConfigs.length === 0
-                  ? t('agentChat.noModel')
-                  : llmConfigs.find(c => c.id === selectedLlm)?.model || t('agentChat.selectModel')}
+                {llmConfigs.find(c => c.id === currentSession.llm_config_id)?.model || '未知模型'}
               </span>
-              <ChevronDown className="w-4 h-4" />
-            </button>
-
-            {showLlmDropdown && (
-              <div className="absolute top-full mt-2 right-0 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50 max-h-64 overflow-y-auto">
-                {llmConfigs.filter(c => c && c.id && c.is_active).length > 0 ? (
-                  <div className="py-1">
-                    {llmConfigs.filter(c => c && c.id && c.is_active).map(config => (
-                      <button
-                        key={config.id}
-                        onClick={() => {
-                          setSelectedLlm(config.id)
-                          setShowLlmDropdown(false)
-                        }}
-                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
-                          selectedLlm === config.id ? 'bg-gray-100 dark:bg-gray-700' : ''
-                        }`}
-                      >
-                        <div className="font-medium text-gray-900 dark:text-gray-100">{config.model}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">{config.provider}</div>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="py-4 px-4">
-                    <div className="text-center">
-                      <Bot className="w-10 h-10 mx-auto mb-3 text-gray-400 dark:text-gray-500" />
-                      <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                        {t('agentChat.noModelDesc')}
-                      </p>
-                      <button
-                        onClick={() => {
-                          setShowLlmDropdown(false)
-                          navigate('/llm')
-                        }}
-                        className="w-full px-4 py-2 bg-gray-900 dark:bg-gray-700 text-white rounded-lg hover:bg-gray-800 dark:hover:bg-gray-600 transition-colors text-sm font-medium"
-                      >
-                        {t('agentChat.goToConfig')}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+            </div>
+          )}
           
           {/* MCP 状态 */}
           {mcpStatus && (
@@ -718,10 +693,10 @@ export default function AgentChat() {
 
           {/* 新建会话按钮 */}
           <button
-            onClick={createSession}
-            disabled={llmConfigs.length === 0}
+            onClick={showCreateSessionDialog}
+            disabled={llmConfigs.filter(c => c && c.is_active).length === 0}
             className="flex items-center gap-2 px-4 py-2 bg-gray-900 dark:bg-gray-700 text-white rounded-lg hover:bg-gray-800 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title={llmConfigs.length === 0 ? t('agentChat.noModelDesc') : ''}
+            title={llmConfigs.filter(c => c && c.is_active).length === 0 ? t('agentChat.noModelDesc') : ''}
           >
             <MessageSquarePlus className="w-4 h-4" />
             <span>{t('agentChat.newSession')}</span>
@@ -971,6 +946,53 @@ export default function AgentChat() {
           </>
         )}
       </div>
+
+      {/* 新建会话对话框 */}
+      {showNewSessionDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div ref={newSessionDialogRef} className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+              选择模型
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              会话创建后将使用选定的模型，无法更改
+            </p>
+            
+            <div className="space-y-2 mb-6">
+              {llmConfigs.filter(c => c && c.id && c.is_active).map(config => (
+                <button
+                  key={config.id}
+                  onClick={() => setSelectedLlmForNewSession(config.id)}
+                  className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-colors ${
+                    selectedLlmForNewSession === config.id
+                      ? 'border-gray-900 dark:border-gray-600 bg-gray-50 dark:bg-gray-700'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                  }`}
+                >
+                  <div className="font-medium text-gray-900 dark:text-gray-100">{config.model}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{config.provider}</div>
+                </button>
+              ))}
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowNewSessionDialog(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => createSession(selectedLlmForNewSession)}
+                disabled={!selectedLlmForNewSession}
+                className="flex-1 px-4 py-2 bg-gray-900 dark:bg-gray-700 text-white rounded-lg hover:bg-gray-800 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                创建会话
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast 提示 */}
       {showToast && (
