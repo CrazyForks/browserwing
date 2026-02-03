@@ -127,6 +127,14 @@ export default function ScriptManager() {
   const [showFloatingAddActionMenu, setShowFloatingAddActionMenu] = useState(false)
   const actionButtonsRef = useRef<HTMLDivElement>(null)
 
+  // 删除所有 sleep 操作确认对话框
+  const [showRemoveSleepConfirm, setShowRemoveSleepConfirm] = useState(false)
+  const [sleepActionsCount, setSleepActionsCount] = useState(0)
+
+  // 批量删除确认对话框
+  const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false)
+  const [showBatchDeleteExecutionsConfirm, setShowBatchDeleteExecutionsConfirm] = useState(false)
+
   const showMessage = useCallback((msg: string, type: 'success' | 'error' | 'info' = 'info') => {
     setMessage(msg)
     setToastType(type)
@@ -781,6 +789,24 @@ export default function ScriptManager() {
     setEditingActions([...editingActions, newAction])
   }
 
+  const handleRemoveAllSleepActions = () => {
+    const sleepCount = editingActions.filter(action => action.type === 'sleep').length
+    if (sleepCount === 0) {
+      showMessage(t('script.editor.noSleepActions') || '没有延迟操作', 'info')
+      return
+    }
+
+    setSleepActionsCount(sleepCount)
+    setShowRemoveSleepConfirm(true)
+  }
+
+  const confirmRemoveAllSleepActions = () => {
+    const filteredActions = editingActions.filter(action => action.type !== 'sleep')
+    setEditingActions(filteredActions)
+    showMessage(t('script.editor.sleepActionsRemoved')?.replace('{count}', sleepActionsCount.toString()) || `已删除 ${sleepActionsCount} 个延迟操作`, 'success')
+    setShowRemoveSleepConfirm(false)
+  }
+
   const toggleScriptExpand = (scriptId: string) => {
     setExpandedScriptId(expandedScriptId === scriptId ? null : scriptId)
   }
@@ -1164,12 +1190,13 @@ export default function ScriptManager() {
       return
     }
 
-    if (!confirm(t('script.batchDeleteConfirm', { count: selectedScripts.size }))) {
-      return
-    }
+    setShowBatchDeleteConfirm(true)
+  }
 
+  const confirmBatchDelete = async () => {
     try {
       setLoading(true)
+      setShowBatchDeleteConfirm(false)
       const response = await api.batchDeleteScripts(Array.from(selectedScripts))
       showMessage(t(response.data.message, { count: response.data.count }), 'success')
       setSelectedScripts(new Set())
@@ -1244,18 +1271,19 @@ export default function ScriptManager() {
     }
   }
 
-  const handleBatchDeleteExecutions = async () => {
+  const handleBatchDeleteExecutions = () => {
     if (selectedExecutions.size === 0) {
       showMessage(t('execution.messages.selectAtLeastOne'), 'info')
       return
     }
 
-    if (!confirm(t('execution.batchDeleteConfirm', { count: selectedExecutions.size.toString() }))) {
-      return
-    }
+    setShowBatchDeleteExecutionsConfirm(true)
+  }
 
+  const confirmBatchDeleteExecutions = async () => {
     try {
       setLoading(true)
+      setShowBatchDeleteExecutionsConfirm(false)
       await api.batchDeleteScriptExecutions(Array.from(selectedExecutions))
       showMessage(t('execution.messages.batchDeleteSuccess', { count: selectedExecutions.size.toString() }), 'success')
       setSelectedExecutions(new Set())
@@ -1322,6 +1350,16 @@ export default function ScriptManager() {
               </span>
             </div>
             <div className="flex items-center space-x-3">
+              {editingActions.some(action => action.type === 'sleep') && (
+                <button
+                  onClick={handleRemoveAllSleepActions}
+                  className="flex items-center space-x-1 px-3 py-1.5 text-sm font-medium bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors shadow-sm"
+                  title={t('script.editor.removeAllSleep')}
+                >
+                  <Clock className="w-4 h-4" />
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
               <div className="relative">
                 <button
                   onClick={() => setShowFloatingAddActionMenu(!showFloatingAddActionMenu)}
@@ -2218,15 +2256,26 @@ export default function ScriptManager() {
                                   {t('script.editor.actionsTitle')}
                                 </h4>
                                 {isEditing && (
-                                  <div className="relative">
-                                    <button
-                                      onClick={() => setShowAddActionMenu(!showAddActionMenu)}
-                                      className="flex items-center space-x-1 px-3 py-1.5 text-sm font-medium bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg transition-colors shadow-sm"
-                                    >
-                                      <Plus className="w-4 h-4" />
-                                      <span>{t('script.editor.addAction')}</span>
-                                      <ChevronDown className={`w-4 h-4 transition-transform ${showAddActionMenu ? 'rotate-180' : ''}`} />
-                                    </button>
+                                  <div className="flex items-center space-x-2">
+                                    {editingActions.some(action => action.type === 'sleep') && (
+                                      <button
+                                        onClick={handleRemoveAllSleepActions}
+                                        className="flex items-center space-x-1 px-3 py-1.5 text-sm font-medium bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors shadow-sm"
+                                        title={t('script.editor.removeAllSleep')}
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                        <span>{t('script.editor.removeAllSleep')}</span>
+                                      </button>
+                                    )}
+                                    <div className="relative">
+                                      <button
+                                        onClick={() => setShowAddActionMenu(!showAddActionMenu)}
+                                        className="flex items-center space-x-1 px-3 py-1.5 text-sm font-medium bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg transition-colors shadow-sm"
+                                      >
+                                        <Plus className="w-4 h-4" />
+                                        <span>{t('script.editor.addAction')}</span>
+                                        <ChevronDown className={`w-4 h-4 transition-transform ${showAddActionMenu ? 'rotate-180' : ''}`} />
+                                      </button>
 
                                     {showAddActionMenu && (
                                       <>
@@ -2428,6 +2477,7 @@ export default function ScriptManager() {
                                         </div>
                                       </>
                                     )}
+                                    </div>
                                   </div>
                                 )}
                               </div>
@@ -2778,6 +2828,45 @@ export default function ScriptManager() {
           cancelText={t('common.cancel')}
           onConfirm={handleDeleteScript}
           onCancel={() => setDeleteConfirm({ show: false, scriptId: null })}
+        />
+      )}
+
+      {/* Remove All Sleep Actions Confirmation Dialog */}
+      {showRemoveSleepConfirm && (
+        <ConfirmDialog
+          title={t('script.editor.removeAllSleep')}
+          message={t('script.editor.confirmRemoveAllSleep')?.replace('{count}', sleepActionsCount.toString()) || `确定要删除所有 ${sleepActionsCount} 个延迟操作吗？`}
+          confirmText={t('common.confirm')}
+          cancelText={t('common.cancel')}
+          confirmButtonClass="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
+          onConfirm={confirmRemoveAllSleepActions}
+          onCancel={() => setShowRemoveSleepConfirm(false)}
+        />
+      )}
+
+      {/* Batch Delete Scripts Confirmation Dialog */}
+      {showBatchDeleteConfirm && (
+        <ConfirmDialog
+          title={t('script.batchDeleteTitle') || '批量删除脚本'}
+          message={t('script.batchDeleteConfirm', { count: selectedScripts.size })}
+          confirmText={t('common.delete')}
+          cancelText={t('common.cancel')}
+          confirmButtonClass="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
+          onConfirm={confirmBatchDelete}
+          onCancel={() => setShowBatchDeleteConfirm(false)}
+        />
+      )}
+
+      {/* Batch Delete Executions Confirmation Dialog */}
+      {showBatchDeleteExecutionsConfirm && (
+        <ConfirmDialog
+          title={t('execution.batchDeleteTitle') || '批量删除执行记录'}
+          message={t('execution.batchDeleteConfirm', { count: selectedExecutions.size.toString() })}
+          confirmText={t('common.delete')}
+          cancelText={t('common.cancel')}
+          confirmButtonClass="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
+          onConfirm={confirmBatchDeleteExecutions}
+          onCancel={() => setShowBatchDeleteExecutionsConfirm(false)}
         />
       )}
 
