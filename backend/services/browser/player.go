@@ -346,10 +346,11 @@ func getI18nText(key, lang string) string {
 			"action.execute_js":        "执行JS",
 			"action.upload_file":       "上传文件",
 			"action.scroll":            "滚动页面",
-			"action.keyboard":          "键盘事件",
-			"action.open_tab":          "打开新标签页",
-			"action.switch_tab":        "切换标签页",
-			"action.switch_active_tab": "切换到活跃标签页",
+		"action.keyboard":          "键盘事件",
+		"action.screenshot":        "截图",
+		"action.open_tab":          "打开新标签页",
+		"action.switch_tab":        "切换标签页",
+		"action.switch_active_tab": "切换到活跃标签页",
 		},
 		"zh-TW": {
 			// AI 控制指示器
@@ -373,10 +374,11 @@ func getI18nText(key, lang string) string {
 			"action.execute_js":        "執行JS",
 			"action.upload_file":       "上傳檔案",
 			"action.scroll":            "滾動頁面",
-			"action.keyboard":          "鍵盤事件",
-			"action.open_tab":          "打開新標籤頁",
-			"action.switch_tab":        "切換標籤頁",
-			"action.switch_active_tab": "切換到活躍標籤頁",
+		"action.keyboard":          "鍵盤事件",
+		"action.screenshot":        "截圖",
+		"action.open_tab":          "打開新標籤頁",
+		"action.switch_tab":        "切換標籤頁",
+		"action.switch_active_tab": "切換到活躍標籤頁",
 		},
 		"en": {
 			// AI Control Indicator
@@ -400,10 +402,11 @@ func getI18nText(key, lang string) string {
 			"action.execute_js":        "Execute JS",
 			"action.upload_file":       "Upload File",
 			"action.scroll":            "Scroll Page",
-			"action.keyboard":          "Keyboard Event",
-			"action.open_tab":          "Open New Tab",
-			"action.switch_tab":        "Switch Tab",
-			"action.switch_active_tab": "Switch to Active Tab",
+		"action.keyboard":          "Keyboard Event",
+		"action.screenshot":        "Screenshot",
+		"action.open_tab":          "Open New Tab",
+		"action.switch_tab":        "Switch Tab",
+		"action.switch_active_tab": "Switch to Active Tab",
 		},
 	}
 
@@ -486,6 +489,10 @@ func (p *Player) StartDownloadListener(ctx context.Context, browser *rod.Browser
 			fileName, exists := downloadMap[e.GUID]
 			if !exists {
 				logger.Warn(ctx, "Download completed but filename not found (GUID: %s)", e.GUID)
+				return
+			}
+			// 如果是截图，则也不进行在这里监听返回，包含 browserwing_screenshot_ 前缀
+			if strings.Contains(fileName, "browserwing_screenshot_") {
 				return
 			}
 
@@ -1169,6 +1176,8 @@ func (p *Player) executeAction(ctx context.Context, page *rod.Page, action model
 		return p.executeScroll(ctx, activePage, action)
 	case "keyboard":
 		return p.executeKeyboard(ctx, activePage, action)
+	case "screenshot":
+		return p.executeScreenshot(ctx, activePage, action)
 	default:
 		logger.Warn(ctx, "Unknown action type: %s", action.Type)
 		return nil
@@ -2585,6 +2594,74 @@ func (p *Player) executeKeyboard(ctx context.Context, page *rod.Page, action mod
 	time.Sleep(300 * time.Millisecond)
 
 	logger.Info(ctx, "✓ Keyboard action completed: %s", key)
+	return nil
+}
+
+// executeScreenshot 执行截图操作
+func (p *Player) executeScreenshot(ctx context.Context, page *rod.Page, action models.ScriptAction) error {
+	logger.Info(ctx, "Taking screenshot of current page")
+
+	// 等待页面稳定
+	time.Sleep(500 * time.Millisecond)
+
+	// 获取截图（PNG格式）
+	screenshot, err := page.Screenshot(true, nil)
+	if err != nil {
+		return fmt.Errorf("failed to take screenshot: %w", err)
+	}
+
+	// 确保下载目录存在
+	if p.downloadPath == "" {
+		return fmt.Errorf("download path not set")
+	}
+
+	// 创建下载目录（如果不存在）
+	if err := os.MkdirAll(p.downloadPath, 0755); err != nil {
+		return fmt.Errorf("failed to create download directory: %w", err)
+	}
+
+	// 生成唯一的文件名
+	timestamp := time.Now().Format("20060102_150405")
+	fileName := fmt.Sprintf("browserwing_screenshot_%s.png", timestamp)
+	
+	// 如果有自定义变量名，使用它作为文件名前缀
+	if action.VariableName != "" {
+		// 清理变量名，移除非法字符
+		cleanName := strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+				return r
+			}
+			return '_'
+		}, action.VariableName)
+		fileName = fmt.Sprintf("%s_%s.png", cleanName, timestamp)
+	}
+
+	// 构建完整路径
+	fullPath := filepath.Join(p.downloadPath, fileName)
+
+	// 保存截图到文件
+	if err := os.WriteFile(fullPath, screenshot, 0644); err != nil {
+		return fmt.Errorf("failed to save screenshot to file: %w", err)
+	}
+
+	// 存储截图数据
+	varName := action.VariableName
+	if varName == "" {
+		varName = fmt.Sprintf("screenshot_%d", len(p.extractedData))
+	}
+
+	// 保存为包含元数据的结构
+	screenshotData := map[string]interface{}{
+		"path":      fullPath,
+		"fileName":  fileName,
+		"format":    "png",
+		"size":      len(screenshot),
+		"timestamp": time.Now().Format(time.RFC3339),
+	}
+
+	p.extractedData[varName] = screenshotData
+
+	logger.Info(ctx, "✓ Screenshot saved successfully: %s (path: %s, size: %d bytes)", varName, fullPath, len(screenshot))
 	return nil
 }
 

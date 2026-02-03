@@ -762,6 +762,12 @@ export default function ScriptManager() {
       newAction.description = t('script.action.keyboardDefault')
     }
 
+    // 为截图类型设置默认值
+    if (type === 'screenshot') {
+      newAction.variable_name = `screenshot_${editingActions.length}`
+      newAction.description = t('script.action.screenshotDefault')
+    }
+
     // 为打开新标签页类型设置默认值
     if (type === 'open_tab') {
       newAction.url = 'https://'
@@ -1361,6 +1367,7 @@ export default function ScriptManager() {
                           <button onClick={() => { handleAddAction('execute_js'); setShowFloatingAddActionMenu(false); }} className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors">Execute JS</button>
                           <button onClick={() => { handleAddAction('upload_file'); setShowFloatingAddActionMenu(false); }} className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors">Upload File</button>
                           <button onClick={() => { handleAddAction('keyboard'); setShowFloatingAddActionMenu(false); }} className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors">Keyboard</button>
+                          <button onClick={() => { handleAddAction('screenshot'); setShowFloatingAddActionMenu(false); }} className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors">Screenshot</button>
                         </div>
                       </div>
                       <div className="px-3 py-2">
@@ -2351,7 +2358,7 @@ export default function ScriptManager() {
                                                   handleAddAction('execute_js')
                                                   setShowAddActionMenu(false)
                                                 }}
-                                                className="px-3 py-2 text-xs text-left bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded transition-colors"
+                                                className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
                                               >
                                                 Execute JS
                                               </button>
@@ -2360,7 +2367,7 @@ export default function ScriptManager() {
                                                   handleAddAction('upload_file')
                                                   setShowAddActionMenu(false)
                                                 }}
-                                                className="px-3 py-2 text-xs text-left bg-orange-50 dark:bg-orange-900/20 hover:bg-orange-100 dark:hover:bg-orange-900/30 text-orange-700 dark:text-orange-300 rounded transition-colors"
+                                                className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
                                               >
                                                 Upload File
                                               </button>
@@ -2369,9 +2376,18 @@ export default function ScriptManager() {
                                                   handleAddAction('keyboard')
                                                   setShowAddActionMenu(false)
                                                 }}
-                                                className="px-3 py-2 text-xs text-left bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded transition-colors"
+                                                className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
                                               >
                                                 Keyboard
+                                              </button>
+                                              <button
+                                                onClick={() => {
+                                                  handleAddAction('screenshot')
+                                                  setShowAddActionMenu(false)
+                                                }}
+                                                className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                                              >
+                                                Screenshot
                                               </button>
                                             </div>
                                           </div>
@@ -3534,7 +3550,8 @@ function SortableActionItem({ id, action, index, onUpdate, onDelete, onDuplicate
               action.type !== 'keyboard' &&
               action.type !== 'switch_tab' &&
               action.type !== 'open_tab' &&
-              action.type !== 'switch_active_tab' && (
+              action.type !== 'switch_active_tab' &&
+              action.type !== 'screenshot' && (
                 <>
                   <div>
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">{t('script.action.selector')}</label>
@@ -3802,6 +3819,31 @@ function SortableActionItem({ id, action, index, onUpdate, onDelete, onDuplicate
               <div>
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">{t('script.action.switchActiveTab')}</label>
               </div>
+            )}
+            {action.type === 'screenshot' && (
+              <>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">{t('script.action.variableName')} ({t('script.action.optional')})</label>
+                  <input
+                    type="text"
+                    value={action.variable_name || ''}
+                    onChange={(e) => onUpdate(index, 'variable_name', e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg font-mono bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="screenshot_0"
+                  />
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('script.action.variableHint')}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">{t('script.action.description')} ({t('script.action.optional')})</label>
+                  <input
+                    type="text"
+                    value={action.description || ''}
+                    onChange={(e) => onUpdate(index, 'description', e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder={t('script.action.screenshotDescPlaceholder')}
+                  />
+                </div>
+              </>
             )}
           </div>
           <div>
@@ -4233,6 +4275,22 @@ function ActionItemView({ action, index }: ActionItemViewProps) {
           <div className="text-sm text-gray-600 dark:text-gray-400">
             <span className="font-medium">{t('script.action.switchActiveTab')}</span>
           </div>
+        )}
+        {action.type === 'screenshot' && (
+          <>
+            {action.variable_name && (
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                <span className="font-medium">{t('script.action.variableName')}</span>{' '}
+                <code className="bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-300 px-2 py-1 rounded text-sm">{action.variable_name}</code>
+              </div>
+            )}
+            {action.description && (
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                <span className="font-medium">{t('script.action.description')}</span>{' '}
+                <span className="text-gray-800 dark:text-gray-200">{action.description}</span>
+              </div>
+            )}
+          </>
         )}
         {/* 语义信息展示 */}
         {(action.intent || action.accessibility || action.context || action.evidence) && (
