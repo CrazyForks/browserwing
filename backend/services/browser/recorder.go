@@ -26,6 +26,9 @@ var iframeRecorderScript string
 //go:embed scripts/iframe_listener.js
 var iframeMessageListenerScript string
 
+//go:embed scripts/xhr_interceptor.js
+var xhrInterceptorScript string
+
 // Recorder 浏览器操作录制器
 type Recorder struct {
 	mu              sync.Mutex
@@ -121,6 +124,15 @@ func (r *Recorder) StartRecording(ctx context.Context, page *rod.Page, url strin
 	}
 
 	logger.Info(ctx, "Preparing to inject recording script into page (language: %s)...", language)
+	
+	// 首先设置 EvalOnNewDocument，确保所有新文档（包括iframe和新页面）都会自动注入XHR拦截器
+	// 这样可以在页面加载的最早期就开始监听XHR请求
+	_, err := page.EvalOnNewDocument(xhrInterceptorScript)
+	if err != nil {
+		logger.Warn(ctx, "Failed to set EvalOnNewDocument for XHR interceptor: %v", err)
+	} else {
+		logger.Info(ctx, "✓ XHR interceptor will be injected into all new documents")
+	}
 
 	// 等待页面完全加载
 	if err := page.WaitLoad(); err != nil {
@@ -132,7 +144,7 @@ func (r *Recorder) StartRecording(ctx context.Context, page *rod.Page, url strin
 
 	// 禁用 CSP 以允许向 localhost API 发送请求
 	// 这对于像 Twitter 这样有严格 CSP 策略的网站是必需的
-	err := proto.PageSetBypassCSP{Enabled: true}.Call(page)
+	err = proto.PageSetBypassCSP{Enabled: true}.Call(page)
 	if err != nil {
 		logger.Warn(ctx, "Failed to disable CSP: %v", err)
 	} else {
@@ -148,6 +160,14 @@ func (r *Recorder) StartRecording(ctx context.Context, page *rod.Page, url strin
 	}
 	logger.Info(ctx, "Page script test result: %v", testResult.Value)
 
+	// 立即在当前页面注入XHR拦截器（EvalOnNewDocument只对新文档生效）
+	_, err = page.Eval(`() => { ` + xhrInterceptorScript + ` return true; }`)
+	if err != nil {
+		logger.Warn(ctx, "Failed to inject XHR interceptor into current page: %v", err)
+	} else {
+		logger.Info(ctx, "✓ XHR interceptor injected into current page")
+	}
+	
 	// 设置录制模式标志,让脚本知道这是录制模式
 	_, err = page.Eval(`() => { window.__browserwingRecordingMode__ = true; }`)
 	if err != nil {

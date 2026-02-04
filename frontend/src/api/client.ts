@@ -258,6 +258,11 @@ export interface ScriptAction {
   // 滚动相关字段
   scroll_x?: number
   scroll_y?: number
+  
+  // XHR请求相关字段（用于 capture_xhr 类型）
+  method?: string
+  status?: number
+  xhr_id?: string
 
   // 语义信息字段（用于自愈）
   intent?: {

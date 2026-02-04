@@ -54,6 +54,11 @@ type ScriptAction struct {
 	// 滚动相关字段
 	ScrollX int `json:"scroll_x,omitempty"`
 	ScrollY int `json:"scroll_y,omitempty"`
+	
+	// XHR请求相关字段（用于 capture_xhr 类型）
+	Method string `json:"method,omitempty"` // HTTP方法: GET, POST, PUT, DELETE等
+	Status int    `json:"status,omitempty"` // HTTP状态码
+	XHRID  string `json:"xhr_id,omitempty"` // XHR请求唯一标识符
 
 	Condition *ActionCondition `json:"condition,omitempty"`
 

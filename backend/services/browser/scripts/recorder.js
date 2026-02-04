@@ -17,6 +17,213 @@ if (window.__browserwingRecorder__) {
 	window.__selectedElement__ = null; // AI模式选中的元素
 	window.__recordingFloatButton__ = null; // 浮动录制按钮
 	window.__isRecordingActive__ = false; // 录制是否激活
+	window.__capturedXHRs__ = []; // 捕获的XHR请求列表
+	window.__xhrDialogOpen__ = false; // XHR对话框是否打开
+	window.__recordingStateBeforeXHRDialog__ = false; // XHR对话框打开前的录制状态
+	
+	// ============= XHR/Fetch 监听拦截 =============
+	
+	// 初始化XHR和Fetch拦截
+	var initXHRInterceptor = function() {
+		// 检查是否已经通过xhr_interceptor.js安装过拦截器
+		if (window.__browserwingXHRInterceptor__) {
+			console.log('[BrowserWing] XHR interceptor already installed by xhr_interceptor.js');
+			return;
+		}
+		
+		console.log('[BrowserWing] Initializing XHR/Fetch interceptor from recorder.js (fallback)...');
+		
+		// 拦截 XMLHttpRequest
+		var originalXHROpen = XMLHttpRequest.prototype.open;
+		var originalXHRSend = XMLHttpRequest.prototype.send;
+		
+		XMLHttpRequest.prototype.open = function(method, url) {
+			this.__browserwing_xhr_info__ = {
+				id: 'xhr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+				type: 'xhr',
+				method: method,
+				url: url,
+				startTime: Date.now(),
+				requestHeaders: {},
+				responseHeaders: {},
+				status: null,
+				statusText: null,
+				response: null,
+				responseType: this.responseType || 'text'
+			};
+			return originalXHROpen.apply(this, arguments);
+		};
+		
+		XMLHttpRequest.prototype.send = function(body) {
+			var xhr = this;
+			var xhrInfo = xhr.__browserwing_xhr_info__;
+			
+			if (xhrInfo) {
+				// 记录请求体
+				xhrInfo.requestBody = body;
+				
+					// 监听加载完成事件
+					xhr.addEventListener('readystatechange', function() {
+						if (xhr.readyState === 4) {
+							xhrInfo.endTime = Date.now();
+							xhrInfo.duration = xhrInfo.endTime - xhrInfo.startTime;
+							xhrInfo.status = xhr.status;
+							xhrInfo.statusText = xhr.statusText;
+							
+							// 只捕获成功的请求（状态码200-299），过滤掉network error和其他错误
+							if (xhr.status === 0 || xhr.status < 200 || xhr.status >= 400) {
+								console.log('[BrowserWing] Skipped failed request:', xhrInfo.method, xhrInfo.url, 'Status:', xhr.status);
+								return;
+							}
+							
+							// 获取响应头
+							try {
+								var responseHeaders = xhr.getAllResponseHeaders();
+								if (responseHeaders) {
+									responseHeaders.split('\r\n').forEach(function(line) {
+										var parts = line.split(': ');
+										if (parts.length === 2) {
+											xhrInfo.responseHeaders[parts[0]] = parts[1];
+										}
+									});
+								}
+							} catch (e) {
+								console.warn('[BrowserWing] Failed to get response headers:', e);
+							}
+							
+							// 获取响应数据
+							try {
+								if (xhr.responseType === '' || xhr.responseType === 'text') {
+									xhrInfo.response = xhr.responseText;
+									xhrInfo.responseSize = xhr.responseText ? xhr.responseText.length : 0;
+								} else if (xhr.responseType === 'json') {
+									xhrInfo.response = xhr.response;
+									xhrInfo.responseSize = JSON.stringify(xhr.response).length;
+								} else {
+									xhrInfo.response = '[Binary Data]';
+									xhrInfo.responseSize = 0;
+								}
+							} catch (e) {
+								console.warn('[BrowserWing] Failed to get response:', e);
+								xhrInfo.response = '[Error reading response]';
+							}
+							
+							// 添加到捕获列表
+							window.__capturedXHRs__.push(xhrInfo);
+							console.log('[BrowserWing] Captured XHR:', xhrInfo.method, xhrInfo.url, 'Status:', xhrInfo.status);
+							
+							// 更新XHR按钮角标
+							updateXHRButtonBadge();
+						}
+					});
+			}
+			
+			return originalXHRSend.apply(this, arguments);
+		};
+		
+		// 拦截 Fetch API
+		var originalFetch = window.fetch;
+		window.fetch = function(input, init) {
+			var url = typeof input === 'string' ? input : input.url;
+			var method = (init && init.method) || 'GET';
+			
+			var fetchInfo = {
+				id: 'fetch_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+				type: 'fetch',
+				method: method.toUpperCase(),
+				url: url,
+				startTime: Date.now(),
+				requestHeaders: (init && init.headers) || {},
+				requestBody: (init && init.body) || null,
+				responseHeaders: {},
+				status: null,
+				statusText: null,
+				response: null
+			};
+			
+		return originalFetch.apply(this, arguments).then(function(response) {
+			fetchInfo.endTime = Date.now();
+			fetchInfo.duration = fetchInfo.endTime - fetchInfo.startTime;
+			fetchInfo.status = response.status;
+			fetchInfo.statusText = response.statusText;
+			
+			// 只捕获成功的请求（状态码200-299），过滤掉错误请求
+			if (response.status < 200 || response.status >= 400) {
+				console.log('[BrowserWing] Skipped failed Fetch:', fetchInfo.method, fetchInfo.url, 'Status:', response.status);
+				return response;
+			}
+			
+			// 获取响应头
+			response.headers.forEach(function(value, key) {
+				fetchInfo.responseHeaders[key] = value;
+			});
+			
+			// 克隆响应以便读取body
+			var clonedResponse = response.clone();
+			
+			// 尝试读取响应体
+			var contentType = response.headers.get('content-type') || '';
+			if (contentType.indexOf('application/json') !== -1) {
+				clonedResponse.json().then(function(data) {
+					fetchInfo.response = data;
+					fetchInfo.responseSize = JSON.stringify(data).length;
+					window.__capturedXHRs__.push(fetchInfo);
+					console.log('[BrowserWing] Captured Fetch:', fetchInfo.method, fetchInfo.url, 'Status:', fetchInfo.status);
+					updateXHRButtonBadge();
+				}).catch(function(e) {
+					console.warn('[BrowserWing] Failed to parse JSON response:', e);
+				});
+			} else if (contentType.indexOf('text/') !== -1) {
+				clonedResponse.text().then(function(text) {
+					fetchInfo.response = text;
+					fetchInfo.responseSize = text.length;
+					window.__capturedXHRs__.push(fetchInfo);
+					console.log('[BrowserWing] Captured Fetch:', fetchInfo.method, fetchInfo.url, 'Status:', fetchInfo.status);
+					updateXHRButtonBadge();
+				}).catch(function(e) {
+					console.warn('[BrowserWing] Failed to read text response:', e);
+				});
+			} else {
+				fetchInfo.response = '[Binary or unknown content type]';
+				fetchInfo.responseSize = 0;
+				window.__capturedXHRs__.push(fetchInfo);
+				console.log('[BrowserWing] Captured Fetch:', fetchInfo.method, fetchInfo.url, 'Status:', fetchInfo.status);
+				updateXHRButtonBadge();
+			}
+			
+			return response;
+		}).catch(function(error) {
+			// Network error - 不记录
+			console.log('[BrowserWing] Skipped network error:', fetchInfo.method, fetchInfo.url, error);
+			fetchInfo.endTime = Date.now();
+			fetchInfo.duration = fetchInfo.endTime - fetchInfo.startTime;
+				fetchInfo.status = 0;
+				fetchInfo.statusText = 'Network Error';
+				fetchInfo.response = error.message || 'Fetch failed';
+				window.__capturedXHRs__.push(fetchInfo);
+				console.log('[BrowserWing] Captured Fetch Error:', fetchInfo.method, fetchInfo.url);
+				updateXHRButtonBadge();
+				throw error;
+			});
+		};
+		
+		console.log('[BrowserWing] XHR/Fetch interceptor initialized successfully');
+	};
+	
+	// 更新XHR按钮角标
+	var updateXHRButtonBadge = function() {
+		if (!window.__recorderUI__) return;
+		
+		var xhrBtn = window.__recorderUI__.xhrBtn;
+		if (!xhrBtn) return;
+		
+		var badge = xhrBtn.querySelector('.xhr-badge');
+		if (badge) {
+			var count = window.__capturedXHRs__.length;
+			badge.textContent = count > 99 ? '99+' : count;
+			badge.style.display = count > 0 ? 'flex' : 'none';
+		}
+	};
 	
 	// ============= 录制器 UI 相关函数 =============
 	
@@ -51,30 +258,38 @@ if (window.__browserwingRecorder__) {
 		actionCount.style.cssText = 'color:#64748b;font-size:13px;font-weight:600;letter-spacing:-0.01em;background:rgba(100,116,139,0.08);padding:4px 10px;border-radius:8px;';
 			header.appendChild(actionCount);
 			
-		// 创建按钮区域
-		var buttonArea = document.createElement('div');
-		buttonArea.style.cssText = 'padding:16px 20px;display:flex;gap:10px;border-bottom:1px solid rgba(0,0,0,0.05);background:transparent;';
+	// 创建按钮区域 - 两排布局
+	var buttonArea = document.createElement('div');
+	buttonArea.style.cssText = 'padding:16px 20px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid rgba(0,0,0,0.05);background:transparent;';
+	
+	// 第一排按钮
+	var buttonRow1 = document.createElement('div');
+	buttonRow1.style.cssText = 'display:flex;gap:10px;';
+	
+	// 第二排按钮
+	var buttonRow2 = document.createElement('div');
+	buttonRow2.style.cssText = 'display:flex;gap:10px;';
 		
-		var extractBtn = document.createElement('button');
-		extractBtn.id = '__browserwing_extract_btn__';
-		extractBtn.style.cssText = 'flex:1;padding:8px 14px;background:white;color:#334155;border:1.5px solid rgba(0,0,0,0.12);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 1px 3px rgba(0,0,0,0.04);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-		extractBtn.textContent = '{{DATA_EXTRACT}}';
-		extractBtn.onmouseover = function() {
-			if (!window.__extractMode__) {
-				this.style.background = '#f8fafc';
-				this.style.borderColor = 'rgba(0,0,0,0.18)';
-				this.style.transform = 'translateY(-1px)';
-				this.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)';
-			}
-		};
-		extractBtn.onmouseout = function() {
-			if (!window.__extractMode__) {
-				this.style.background = 'white';
-				this.style.borderColor = 'rgba(0,0,0,0.12)';
-				this.style.transform = 'translateY(0)';
-				this.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
-			}
-		};
+	var extractBtn = document.createElement('button');
+	extractBtn.id = '__browserwing_extract_btn__';
+	extractBtn.style.cssText = 'flex:1;padding:8px 14px;background:#18181b;color:white;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+	extractBtn.textContent = '{{DATA_EXTRACT}}';
+	extractBtn.onmouseover = function() {
+		if (!window.__extractMode__) {
+			this.style.background = '#27272a';
+			this.style.borderColor = 'rgba(255,255,255,0.15)';
+			this.style.transform = 'translateY(-1px)';
+			this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.25)';
+		}
+	};
+	extractBtn.onmouseout = function() {
+		if (!window.__extractMode__) {
+			this.style.background = '#18181b';
+			this.style.borderColor = 'rgba(255,255,255,0.1)';
+			this.style.transform = 'translateY(0)';
+			this.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2)';
+		}
+	};
 		extractBtn.onclick = function(e) {
 			if (panel.__isDragging) return;
 			
@@ -94,49 +309,98 @@ if (window.__browserwingRecorder__) {
 			}
 		};
 		
-		var aiExtractBtn = document.createElement('button');
-		aiExtractBtn.id = '__browserwing_ai_extract_btn__';
-		aiExtractBtn.style.cssText = 'flex:1;padding:8px 14px;background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);color:white;border:1.5px solid rgba(0,0,0,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(15,23,42,0.2), 0 1px 3px rgba(0,0,0,0.1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-		aiExtractBtn.textContent = '{{AI_EXTRACT}}';
-		aiExtractBtn.onmouseover = function() {
-			this.style.background = 'linear-gradient(135deg,#0f172a 0%,#020617 100%)';
-			this.style.transform = 'translateY(-1px)';
-			this.style.boxShadow = '0 4px 12px rgba(15,23,42,0.3), 0 2px 4px rgba(0,0,0,0.15)';
-		};
-		aiExtractBtn.onmouseout = function() {
-			this.style.background = 'linear-gradient(135deg,#1e293b 0%,#0f172a 100%)';
-			this.style.transform = 'translateY(0)';
-			this.style.boxShadow = '0 2px 8px rgba(15,23,42,0.2), 0 1px 3px rgba(0,0,0,0.1)';
-		};
+	var aiExtractBtn = document.createElement('button');
+	aiExtractBtn.id = '__browserwing_ai_extract_btn__';
+	aiExtractBtn.style.cssText = 'flex:1;padding:8px 14px;background:#18181b;color:white;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+	aiExtractBtn.textContent = '{{AI_EXTRACT}}';
+	aiExtractBtn.onmouseover = function() {
+		this.style.background = '#27272a';
+		this.style.borderColor = 'rgba(255,255,255,0.15)';
+		this.style.transform = 'translateY(-1px)';
+		this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.25)';
+	};
+	aiExtractBtn.onmouseout = function() {
+		this.style.background = '#18181b';
+		this.style.borderColor = 'rgba(255,255,255,0.1)';
+		this.style.transform = 'translateY(0)';
+		this.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2)';
+	};
 		aiExtractBtn.onclick = function() {
 			if (!panel.__isDragging) {
 				toggleAIExtractMode();
 			}
 		};
 		
-		var aiFormFillBtn = document.createElement('button');
-		aiFormFillBtn.id = '__browserwing_ai_formfill_btn__';
-		aiFormFillBtn.style.cssText = 'flex:1;padding:8px 14px;background:linear-gradient(135deg,#64748b 0%,#475569 100%);color:white;border:1.5px solid rgba(0,0,0,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(71,85,105,0.2), 0 1px 3px rgba(0,0,0,0.1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-		aiFormFillBtn.textContent = '{{AI_FORMFILL}}';
-		aiFormFillBtn.onmouseover = function() {
-			this.style.background = 'linear-gradient(135deg,#475569 0%,#334155 100%)';
-			this.style.transform = 'translateY(-1px)';
-			this.style.boxShadow = '0 4px 12px rgba(71,85,105,0.3), 0 2px 4px rgba(0,0,0,0.15)';
-		};
-		aiFormFillBtn.onmouseout = function() {
-			this.style.background = 'linear-gradient(135deg,#64748b 0%,#475569 100%)';
-			this.style.transform = 'translateY(0)';
-			this.style.boxShadow = '0 2px 8px rgba(71,85,105,0.2), 0 1px 3px rgba(0,0,0,0.1)';
-		};
-		aiFormFillBtn.onclick = function() {
-			if (!panel.__isDragging) {
-				toggleAIFormFillMode();
-			}
-		};
-		
-		buttonArea.appendChild(extractBtn);
-		buttonArea.appendChild(aiExtractBtn);
-		buttonArea.appendChild(aiFormFillBtn);		// 创建动作列表区域
+	var aiFormFillBtn = document.createElement('button');
+	aiFormFillBtn.id = '__browserwing_ai_formfill_btn__';
+	aiFormFillBtn.style.cssText = 'flex:1;padding:8px 14px;background:#18181b;color:white;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+	aiFormFillBtn.textContent = '{{AI_FORMFILL}}';
+	aiFormFillBtn.onmouseover = function() {
+		this.style.background = '#27272a';
+		this.style.borderColor = 'rgba(255,255,255,0.15)';
+		this.style.transform = 'translateY(-1px)';
+		this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.25)';
+	};
+	aiFormFillBtn.onmouseout = function() {
+		this.style.background = '#18181b';
+		this.style.borderColor = 'rgba(255,255,255,0.1)';
+		this.style.transform = 'translateY(0)';
+		this.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2)';
+	};
+	aiFormFillBtn.onclick = function() {
+		if (!panel.__isDragging) {
+			toggleAIFormFillMode();
+		}
+	};
+	
+	// XHR监听按钮 - 黑白灰极简风格
+	var xhrBtn = document.createElement('button');
+	xhrBtn.id = '__browserwing_xhr_btn__';
+	xhrBtn.style.cssText = 'flex:1;padding:8px 14px;background:#18181b;color:white;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;';
+	
+	var xhrBtnText = document.createElement('span');
+	xhrBtnText.textContent = '{{XHR_MONITOR}}';
+	xhrBtnText.style.cssText = 'opacity:1;visibility:visible;';
+	
+	// 角标 - 灰色系
+	var xhrBadge = document.createElement('span');
+	xhrBadge.className = '__browserwing-protected__ xhr-badge';
+	xhrBadge.style.cssText = 'position:absolute;top:-6px;right:-6px;background:#71717a;color:white;border-radius:10px;padding:2px 6px;font-size:10px;font-weight:700;min-width:18px;height:18px;display:none;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,0.3);';
+	xhrBadge.textContent = '0';
+	
+	xhrBtn.appendChild(xhrBtnText);
+	xhrBtn.appendChild(xhrBadge);
+	
+	xhrBtn.onmouseover = function() {
+		this.style.background = '#27272a';
+		this.style.borderColor = 'rgba(255,255,255,0.15)';
+		this.style.transform = 'translateY(-1px)';
+		this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.25)';
+	};
+	xhrBtn.onmouseout = function() {
+		this.style.background = '#18181b';
+		this.style.borderColor = 'rgba(255,255,255,0.1)';
+		this.style.transform = 'translateY(0)';
+		this.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2)';
+	};
+	xhrBtn.onclick = function() {
+		if (!panel.__isDragging) {
+			showXHRDialog();
+		}
+	};
+	
+	// 第一排：抓取和AI提取
+	buttonRow1.appendChild(extractBtn);
+	buttonRow1.appendChild(aiExtractBtn);
+	
+	// 第二排：AI填表和XHR监听
+	buttonRow2.appendChild(aiFormFillBtn);
+	buttonRow2.appendChild(xhrBtn);
+	
+	buttonArea.appendChild(buttonRow1);
+	buttonArea.appendChild(buttonRow2);
+	
+	// 创建动作列表区域
 
 		var actionList = document.createElement('div');
 		actionList.id = '__browserwing_action_list__';
@@ -299,21 +563,22 @@ if (window.__browserwingRecorder__) {
 		document.body.appendChild(panel);
 		document.body.appendChild(menu);
 		
-		window.__recorderUI__ = {
-			panel: panel,
-			header: header,
-			statusDot: statusDot,
-			statusText: statusText,
-			actionCount: actionCount,
-			extractBtn: extractBtn,
-			aiExtractBtn: aiExtractBtn,
-			aiFormFillBtn: aiFormFillBtn,
-			actionList: actionList,
-			emptyState: emptyState,
-			currentAction: currentAction,
-			menu: menu,
-			stopRecordingBtn: stopRecordingBtn
-		};
+	window.__recorderUI__ = {
+		panel: panel,
+		header: header,
+		statusDot: statusDot,
+		statusText: statusText,
+		actionCount: actionCount,
+		extractBtn: extractBtn,
+		aiExtractBtn: aiExtractBtn,
+		aiFormFillBtn: aiFormFillBtn,
+		xhrBtn: xhrBtn,
+		actionList: actionList,
+		emptyState: emptyState,
+		currentAction: currentAction,
+		menu: menu,
+		stopRecordingBtn: stopRecordingBtn
+	};
 	};
 	
 	// 创建高亮元素
@@ -3020,7 +3285,680 @@ if (window.__browserwingRecorder__) {
 		}, 500); // 500ms 防抖延迟
 	}, true);
 
+	// ============= XHR请求监听相关函数 =============
+	
+	// 显示XHR请求对话框 - 表格样式
+	var showXHRDialog = function() {
+		if (window.__xhrDialogOpen__) {
+			console.log('[BrowserWing] XHR dialog already open');
+			return;
+		}
+		
+		// 保存当前录制状态并暂停录制
+		window.__recordingStateBeforeXHRDialog__ = window.__isRecordingActive__;
+		window.__isRecordingActive__ = false;
+		
+		window.__xhrDialogOpen__ = true;
+		
+		// 创建遮罩层
+		var overlay = document.createElement('div');
+		overlay.id = '__browserwing_xhr_dialog__';
+		overlay.className = '__browserwing-protected__';
+		overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.65);z-index:10000000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+		
+		// 创建对话框 - Notion风格
+		var dialog = document.createElement('div');
+		dialog.className = '__browserwing-protected__';
+		dialog.style.cssText = 'background:#ffffff;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,0.12);max-width:1100px;width:95%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;border:1px solid rgba(0,0,0,0.08);';
+		
+		// 对话框头部 - 简洁灰色
+		var dialogHeader = document.createElement('div');
+		dialogHeader.className = '__browserwing-protected__';
+		dialogHeader.style.cssText = 'padding:20px 24px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;background:#f9fafb;';
+		
+		var titleContainer = document.createElement('div');
+		titleContainer.className = '__browserwing-protected__';
+		
+		var dialogTitle = document.createElement('div');
+		dialogTitle.className = '__browserwing-protected__';
+		dialogTitle.style.cssText = 'font-size:16px;font-weight:600;color:#18181b;';
+		dialogTitle.textContent = '{{XHR_REQUESTS_TITLE}}';
+		
+		var dialogSubtitle = document.createElement('div');
+		dialogSubtitle.className = '__browserwing-protected__';
+		dialogSubtitle.style.cssText = 'font-size:12px;color:#71717a;margin-top:2px;';
+		dialogSubtitle.textContent = '{{CAPTURED_COUNT}}' + window.__capturedXHRs__.length + '{{REQUESTS_UNIT}}';
+		
+		titleContainer.appendChild(dialogTitle);
+		titleContainer.appendChild(dialogSubtitle);
+		
+		var closeBtn = document.createElement('button');
+		closeBtn.className = '__browserwing-protected__';
+		closeBtn.style.cssText = 'background:transparent;border:none;font-size:22px;color:#71717a;cursor:pointer;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;transition:all 0.2s;';
+		closeBtn.textContent = '×';
+		closeBtn.onmouseover = function() {
+			this.style.background = '#e5e7eb';
+			this.style.color = '#18181b';
+		};
+		closeBtn.onmouseout = function() {
+			this.style.background = 'transparent';
+			this.style.color = '#71717a';
+		};
+		closeBtn.onclick = function() {
+			closeXHRDialog(overlay);
+		};
+		
+	dialogHeader.appendChild(titleContainer);
+	dialogHeader.appendChild(closeBtn);
+	
+	// 过滤和搜索栏
+	var filterBar = document.createElement('div');
+	filterBar.className = '__browserwing-protected__';
+	filterBar.style.cssText = 'padding:16px 24px;border-bottom:1px solid #e5e7eb;display:flex;gap:12px;background:#ffffff;';
+	
+	// 搜索框
+	var searchBox = document.createElement('input');
+	searchBox.className = '__browserwing-protected__';
+	searchBox.type = 'text';
+	searchBox.placeholder = '搜索 URL 或 响应数据...';
+	searchBox.style.cssText = 'flex:1;padding:8px 12px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;transition:all 0.2s;';
+	searchBox.onfocus = function() {
+		this.style.borderColor = '#18181b';
+		this.style.boxShadow = '0 0 0 3px rgba(24,24,27,0.1)';
+	};
+	searchBox.onblur = function() {
+		this.style.borderColor = '#e5e7eb';
+		this.style.boxShadow = 'none';
+	};
+	
+	// Method过滤下拉框
+	var methodFilter = document.createElement('select');
+	methodFilter.className = '__browserwing-protected__';
+	methodFilter.style.cssText = 'padding:8px 12px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;background:white;cursor:pointer;outline:none;min-width:100px;';
+	var methodOptions = ['全部方法', 'GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
+	methodOptions.forEach(function(method) {
+		var option = document.createElement('option');
+		option.value = method === '全部方法' ? '' : method;
+		option.textContent = method;
+		methodFilter.appendChild(option);
+	});
+	
+	// 域名过滤下拉框
+	var domainFilter = document.createElement('select');
+	domainFilter.className = '__browserwing-protected__';
+	domainFilter.style.cssText = 'padding:8px 12px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;background:white;cursor:pointer;outline:none;min-width:150px;';
+	
+	// 提取所有唯一域名
+	var domains = ['全部域名'];
+	var domainSet = {};
+	window.__capturedXHRs__.forEach(function(xhr) {
+		try {
+			var url = new URL(xhr.url, window.location.href);
+			var domain = url.hostname;
+			if (!domainSet[domain]) {
+				domainSet[domain] = true;
+				domains.push(domain);
+			}
+		} catch (e) {
+			// 忽略无效URL
+		}
+	});
+	
+	domains.forEach(function(domain) {
+		var option = document.createElement('option');
+		option.value = domain === '全部域名' ? '' : domain;
+		option.textContent = domain;
+		domainFilter.appendChild(option);
+	});
+	
+	filterBar.appendChild(searchBox);
+	filterBar.appendChild(methodFilter);
+	filterBar.appendChild(domainFilter);
+	
+	// 对话框内容
+	var dialogContent = document.createElement('div');
+	dialogContent.className = '__browserwing-protected__';
+	dialogContent.style.cssText = 'overflow-y:auto;flex:1;background:#ffffff;';
+	
+	// 渲染表格函数
+	var renderXHRTable = function(searchText, methodFilter, domainFilter) {
+		// 清空内容
+		dialogContent.innerHTML = '';
+		
+		// 过滤XHR列表
+		var filteredXHRs = window.__capturedXHRs__.filter(function(xhr) {
+			// 搜索过滤 - 支持搜索URL和响应数据
+			if (searchText) {
+				var searchLower = searchText.toLowerCase();
+				var urlMatch = xhr.url.toLowerCase().indexOf(searchLower) !== -1;
+				var responseMatch = false;
+				
+				// 搜索响应数据
+				try {
+					var responseStr = '';
+					if (typeof xhr.response === 'string') {
+						responseStr = xhr.response;
+					} else if (typeof xhr.response === 'object' && xhr.response !== null) {
+						responseStr = JSON.stringify(xhr.response);
+					}
+					responseMatch = responseStr.toLowerCase().indexOf(searchLower) !== -1;
+				} catch (e) {
+					// 忽略错误
+				}
+				
+				if (!urlMatch && !responseMatch) {
+					return false;
+				}
+			}
+			
+			// Method过滤
+			if (methodFilter && xhr.method !== methodFilter) {
+				return false;
+			}
+			
+			// 域名过滤
+			if (domainFilter) {
+				try {
+					var url = new URL(xhr.url, window.location.href);
+					if (url.hostname !== domainFilter) {
+						return false;
+					}
+				} catch (e) {
+					return false;
+				}
+			}
+			
+			return true;
+		});
+		
+		// 更新副标题显示过滤后的数量
+		dialogSubtitle.textContent = '{{CAPTURED_COUNT}}' + filteredXHRs.length + '{{REQUESTS_UNIT}}' + 
+			(filteredXHRs.length !== window.__capturedXHRs__.length ? ' (已过滤 ' + window.__capturedXHRs__.length + ' 个)' : '');
+		
+		// 如果没有请求
+		if (filteredXHRs.length === 0) {
+			var emptyState = document.createElement('div');
+			emptyState.className = '__browserwing-protected__';
+			emptyState.style.cssText = 'padding:60px 24px;text-align:center;color:#a1a1aa;';
+			
+			var emptyIcon = document.createElement('div');
+			emptyIcon.className = '__browserwing-protected__';
+			emptyIcon.style.cssText = 'font-size:48px;margin-bottom:16px;opacity:0.5;';
+			emptyIcon.textContent = window.__capturedXHRs__.length === 0 ? '📡' : '🔍';
+			
+			var emptyText = document.createElement('div');
+			emptyText.className = '__browserwing-protected__';
+			emptyText.style.cssText = 'font-size:14px;font-weight:500;color:#52525b;margin-bottom:8px;';
+			emptyText.textContent = window.__capturedXHRs__.length === 0 ? '{{NO_XHR_CAPTURED}}' : '没有匹配的请求';
+			
+			var emptyHint = document.createElement('div');
+			emptyHint.className = '__browserwing-protected__';
+			emptyHint.style.cssText = 'font-size:12px;color:#a1a1aa;';
+			emptyHint.textContent = window.__capturedXHRs__.length === 0 ? '{{XHR_CAPTURE_HINT}}' : '尝试调整过滤条件';
+			
+			emptyState.appendChild(emptyIcon);
+			emptyState.appendChild(emptyText);
+			emptyState.appendChild(emptyHint);
+			dialogContent.appendChild(emptyState);
+		} else {
+			// 创建表格容器
+			var tableContainer = document.createElement('div');
+			tableContainer.className = '__browserwing-protected__';
+			tableContainer.style.cssText = 'padding:0;';
+			
+			// 创建表格
+			var table = document.createElement('table');
+			table.className = '__browserwing-protected__';
+			table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+			
+			// 表头
+			var thead = document.createElement('thead');
+			thead.className = '__browserwing-protected__';
+			var headerRow = document.createElement('tr');
+			headerRow.className = '__browserwing-protected__';
+			headerRow.style.cssText = 'background:#f9fafb;border-bottom:1px solid #e5e7eb;';
+			
+			var headers = ['方法', 'URL', '{{STATUS}}', '{{DURATION}}', '{{SIZE}}', '操作'];
+			headers.forEach(function(headerText) {
+				var th = document.createElement('th');
+				th.className = '__browserwing-protected__';
+				th.style.cssText = 'padding:12px 16px;text-align:left;font-weight:600;color:#52525b;font-size:12px;white-space:nowrap;';
+				th.textContent = headerText;
+				headerRow.appendChild(th);
+			});
+			thead.appendChild(headerRow);
+			table.appendChild(thead);
+			
+			// 表体
+			var tbody = document.createElement('tbody');
+			tbody.className = '__browserwing-protected__';
+			
+			// 添加过滤后的请求行
+			for (var i = 0; i < filteredXHRs.length; i++) {
+				var row = createXHRTableRow(filteredXHRs[i], i);
+				tbody.appendChild(row);
+			}
+			
+			table.appendChild(tbody);
+			tableContainer.appendChild(table);
+			dialogContent.appendChild(tableContainer);
+		}
+	};
+	
+	// 初始渲染
+	renderXHRTable('', '', '');
+	
+	// 绑定过滤事件
+	searchBox.oninput = function() {
+		renderXHRTable(this.value, methodFilter.value, domainFilter.value);
+	};
+	
+	methodFilter.onchange = function() {
+		renderXHRTable(searchBox.value, this.value, domainFilter.value);
+	};
+	
+	domainFilter.onchange = function() {
+		renderXHRTable(searchBox.value, methodFilter.value, this.value);
+	};
+	
+	// 组装对话框
+	dialog.appendChild(dialogHeader);
+	dialog.appendChild(filterBar);
+	dialog.appendChild(dialogContent);
+	overlay.appendChild(dialog);
+		
+		// 添加到页面
+		document.body.appendChild(overlay);
+		
+		// 点击遮罩层关闭
+		overlay.onclick = function(e) {
+			if (e.target === overlay) {
+				closeXHRDialog(overlay);
+			}
+		};
+	};
+	
+	// 关闭XHR对话框
+	var closeXHRDialog = function(overlay) {
+		if (overlay && overlay.parentNode) {
+			overlay.remove();
+		}
+		window.__xhrDialogOpen__ = false;
+		
+		// 恢复之前的录制状态
+		window.__isRecordingActive__ = window.__recordingStateBeforeXHRDialog__;
+	};
+	
+	// 创建XHR表格行 - 可点击查看详情
+	var createXHRTableRow = function(xhrInfo, index) {
+		var row = document.createElement('tr');
+		row.className = '__browserwing-protected__';
+		row.style.cssText = 'border-bottom:1px solid #f1f5f9;transition:background 0.15s;cursor:pointer;';
+		row.onmouseover = function() {
+			this.style.background = '#fafafa';
+		};
+		row.onmouseout = function() {
+			this.style.background = 'white';
+		};
+		
+		// 方法列
+		var methodCell = document.createElement('td');
+		methodCell.className = '__browserwing-protected__';
+		methodCell.style.cssText = 'padding:14px 16px;';
+		var methodBadge = document.createElement('span');
+		methodBadge.className = '__browserwing-protected__';
+		var methodColor = {
+			'GET': '#18181b',
+			'POST': '#3f3f46',
+			'PUT': '#52525b',
+			'DELETE': '#71717a',
+			'PATCH': '#27272a'
+		}[xhrInfo.method] || '#71717a';
+		methodBadge.style.cssText = 'background:' + methodColor + ';color:white;padding:4px 10px;border-radius:5px;font-size:11px;font-weight:600;display:inline-block;';
+		methodBadge.textContent = xhrInfo.method;
+		methodCell.appendChild(methodBadge);
+		
+		// URL列
+		var urlCell = document.createElement('td');
+		urlCell.className = '__browserwing-protected__';
+		urlCell.style.cssText = 'padding:14px 16px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,monospace;font-size:12px;color:#27272a;';
+		urlCell.textContent = xhrInfo.url;
+		urlCell.title = xhrInfo.url;
+		
+		// 状态列
+		var statusCell = document.createElement('td');
+		statusCell.className = '__browserwing-protected__';
+		statusCell.style.cssText = 'padding:14px 16px;font-size:12px;font-weight:500;color:' + (xhrInfo.status < 300 ? '#18181b' : '#71717a') + ';';
+		statusCell.textContent = xhrInfo.status;
+		
+		// 耗时列
+		var durationCell = document.createElement('td');
+		durationCell.className = '__browserwing-protected__';
+		durationCell.style.cssText = 'padding:14px 16px;font-size:12px;color:#71717a;';
+		durationCell.textContent = xhrInfo.duration + 'ms';
+		
+		// 大小列
+		var sizeCell = document.createElement('td');
+		sizeCell.className = '__browserwing-protected__';
+		sizeCell.style.cssText = 'padding:14px 16px;font-size:12px;color:#71717a;';
+		sizeCell.textContent = xhrInfo.responseSize ? (xhrInfo.responseSize / 1024).toFixed(2) + 'KB' : '-';
+		
+		// 操作列
+		var actionCell = document.createElement('td');
+		actionCell.className = '__browserwing-protected__';
+		actionCell.style.cssText = 'padding:14px 16px;text-align:right;';
+		var selectBtn = document.createElement('button');
+		selectBtn.className = '__browserwing-protected__';
+		selectBtn.style.cssText = 'background:#18181b;color:white;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.2s;';
+		selectBtn.textContent = '{{SELECT_THIS_REQUEST}}';
+		selectBtn.onmouseover = function(e) {
+			e.stopPropagation();
+			this.style.background = '#27272a';
+		};
+		selectBtn.onmouseout = function(e) {
+			e.stopPropagation();
+			this.style.background = '#18181b';
+		};
+		selectBtn.onclick = function(e) {
+			e.stopPropagation();
+			recordXHRAction(xhrInfo);
+			closeXHRDialog(document.getElementById('__browserwing_xhr_dialog__'));
+		};
+		actionCell.appendChild(selectBtn);
+		
+		// 组装行
+		row.appendChild(methodCell);
+		row.appendChild(urlCell);
+		row.appendChild(statusCell);
+		row.appendChild(durationCell);
+		row.appendChild(sizeCell);
+		row.appendChild(actionCell);
+		
+		// 点击行显示详情
+		row.onclick = function(e) {
+			if (e.target !== selectBtn && !selectBtn.contains(e.target)) {
+				showXHRDetailDialog(xhrInfo);
+			}
+		};
+		
+		return row;
+	};
+	
+	// 显示XHR详情对话框
+	var showXHRDetailDialog = function(xhrInfo) {
+		var detailOverlay = document.createElement('div');
+		detailOverlay.className = '__browserwing-protected__';
+		detailOverlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.65);z-index:10000001;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+		
+		var detailDialog = document.createElement('div');
+		detailDialog.className = '__browserwing-protected__';
+		detailDialog.style.cssText = 'background:#ffffff;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,0.12);max-width:800px;width:90%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;border:1px solid rgba(0,0,0,0.08);';
+		
+		// 头部
+		var header = document.createElement('div');
+		header.className = '__browserwing-protected__';
+		header.style.cssText = 'padding:20px 24px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;background:#f9fafb;';
+		
+		var title = document.createElement('div');
+		title.className = '__browserwing-protected__';
+		title.style.cssText = 'font-size:14px;font-weight:600;color:#18181b;';
+		title.textContent = '请求详情';
+		
+		var closeBtn = document.createElement('button');
+		closeBtn.className = '__browserwing-protected__';
+		closeBtn.style.cssText = 'background:transparent;border:none;font-size:22px;color:#71717a;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;transition:all 0.2s;';
+		closeBtn.textContent = '×';
+		closeBtn.onmouseover = function() {
+			this.style.background = '#e5e7eb';
+			this.style.color = '#18181b';
+		};
+		closeBtn.onmouseout = function() {
+			this.style.background = 'transparent';
+			this.style.color = '#71717a';
+		};
+		closeBtn.onclick = function() {
+			detailOverlay.remove();
+		};
+		
+		header.appendChild(title);
+		header.appendChild(closeBtn);
+		
+		// 内容区
+		var content = document.createElement('div');
+		content.className = '__browserwing-protected__';
+		content.style.cssText = 'padding:20px 24px;overflow-y:auto;flex:1;background:#ffffff;';
+		
+		// 基本信息
+		var infoSection = document.createElement('div');
+		infoSection.className = '__browserwing-protected__';
+		infoSection.style.cssText = 'margin-bottom:20px;';
+		
+		var infoTitle = document.createElement('div');
+		infoTitle.className = '__browserwing-protected__';
+		infoTitle.style.cssText = 'font-size:12px;font-weight:600;color:#52525b;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.05em;';
+		infoTitle.textContent = '基本信息';
+		infoSection.appendChild(infoTitle);
+		
+		var infoItems = [
+			['方法', xhrInfo.method],
+			['URL', xhrInfo.url],
+			['状态码', xhrInfo.status + ' ' + (xhrInfo.statusText || '')],
+			['耗时', xhrInfo.duration + 'ms'],
+			['大小', xhrInfo.responseSize ? (xhrInfo.responseSize / 1024).toFixed(2) + 'KB' : '-']
+		];
+		
+		infoItems.forEach(function(item) {
+			var row = document.createElement('div');
+			row.className = '__browserwing-protected__';
+			row.style.cssText = 'display:flex;padding:8px 0;border-bottom:1px solid #f1f5f9;';
+			
+			var label = document.createElement('div');
+			label.className = '__browserwing-protected__';
+			label.style.cssText = 'width:100px;font-size:12px;color:#71717a;font-weight:500;';
+			label.textContent = item[0];
+			
+			var value = document.createElement('div');
+			value.className = '__browserwing-protected__';
+			value.style.cssText = 'flex:1;font-size:12px;color:#27272a;font-family:ui-monospace,monospace;word-break:break-all;';
+			value.textContent = item[1];
+			
+			row.appendChild(label);
+			row.appendChild(value);
+			infoSection.appendChild(row);
+		});
+		
+		content.appendChild(infoSection);
+		
+		// 响应数据
+		var responseSection = document.createElement('div');
+		responseSection.className = '__browserwing-protected__';
+		
+		var responseTitle = document.createElement('div');
+		responseTitle.className = '__browserwing-protected__';
+		responseTitle.style.cssText = 'font-size:12px;font-weight:600;color:#52525b;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.05em;';
+		responseTitle.textContent = '响应数据';
+		responseSection.appendChild(responseTitle);
+		
+		var responseBox = document.createElement('pre');
+		responseBox.className = '__browserwing-protected__';
+		responseBox.style.cssText = 'background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:16px;font-size:11px;color:#27272a;overflow-x:auto;max-height:300px;font-family:ui-monospace,monospace;line-height:1.5;margin:0;';
+		
+		try {
+			if (typeof xhrInfo.response === 'object') {
+				responseBox.textContent = JSON.stringify(xhrInfo.response, null, 2);
+			} else {
+				responseBox.textContent = xhrInfo.response;
+			}
+		} catch (e) {
+			responseBox.textContent = String(xhrInfo.response);
+		}
+		
+		responseSection.appendChild(responseBox);
+		content.appendChild(responseSection);
+		
+		// 组装
+		detailDialog.appendChild(header);
+		detailDialog.appendChild(content);
+		detailOverlay.appendChild(detailDialog);
+		document.body.appendChild(detailOverlay);
+		
+		detailOverlay.onclick = function(e) {
+			if (e.target === detailOverlay) {
+				detailOverlay.remove();
+			}
+		};
+	};
+	
+	// 创建XHR项目元素（保留用于兼容）
+	var createXHRItem = function(xhrInfo, index) {
+		var item = document.createElement('div');
+		item.className = '__browserwing-protected__';
+		item.style.cssText = 'padding:16px 24px;border-bottom:1px solid #f1f5f9;cursor:pointer;transition:all 0.2s;';
+		item.onmouseover = function() {
+			this.style.background = '#f8fafc';
+		};
+		item.onmouseout = function() {
+			this.style.background = 'white';
+		};
+		
+		// 头部（方法和URL）
+		var itemHeader = document.createElement('div');
+		itemHeader.className = '__browserwing-protected__';
+		itemHeader.style.cssText = 'display:flex;align-items:center;gap:12px;margin-bottom:8px;';
+		
+		var methodBadge = document.createElement('span');
+		methodBadge.className = '__browserwing-protected__';
+		var methodColor = {
+			'GET': '#10b981',
+			'POST': '#3b82f6',
+			'PUT': '#f59e0b',
+			'DELETE': '#ef4444',
+			'PATCH': '#8b5cf6'
+		}[xhrInfo.method] || '#6b7280';
+		methodBadge.style.cssText = 'background:' + methodColor + ';color:white;padding:4px 8px;border-radius:4px;font-size:11px;font-weight:700;';
+		methodBadge.textContent = xhrInfo.method;
+		
+		var urlText = document.createElement('div');
+		urlText.className = '__browserwing-protected__';
+		urlText.style.cssText = 'flex:1;font-size:13px;color:#1e293b;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,monospace;';
+		urlText.textContent = xhrInfo.url;
+		urlText.title = xhrInfo.url;
+		
+		itemHeader.appendChild(methodBadge);
+		itemHeader.appendChild(urlText);
+		
+		// 详情（状态、时间、大小）
+		var itemDetails = document.createElement('div');
+		itemDetails.className = '__browserwing-protected__';
+		itemDetails.style.cssText = 'display:flex;gap:16px;font-size:12px;color:#64748b;margin-bottom:12px;';
+		
+		var statusText = document.createElement('span');
+		statusText.className = '__browserwing-protected__';
+		var statusColor = xhrInfo.status >= 200 && xhrInfo.status < 300 ? '#10b981' : '#ef4444';
+		statusText.innerHTML = '{{STATUS}}: <strong style="color:' + statusColor + ';">' + xhrInfo.status + ' ' + xhrInfo.statusText + '</strong>';
+		
+		var durationText = document.createElement('span');
+		durationText.className = '__browserwing-protected__';
+		durationText.innerHTML = '{{DURATION}}: <strong>' + xhrInfo.duration + 'ms</strong>';
+		
+		var sizeText = document.createElement('span');
+		sizeText.className = '__browserwing-protected__';
+		var sizeStr = xhrInfo.responseSize ? (xhrInfo.responseSize / 1024).toFixed(2) + ' KB' : 'N/A';
+		sizeText.innerHTML = '{{SIZE}}: <strong>' + sizeStr + '</strong>';
+		
+		itemDetails.appendChild(statusText);
+		itemDetails.appendChild(durationText);
+		itemDetails.appendChild(sizeText);
+		
+		// 选择按钮
+		var selectBtn = document.createElement('button');
+		selectBtn.className = '__browserwing-protected__';
+		selectBtn.style.cssText = 'background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);color:white;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;transition:all 0.2s;box-shadow:0 2px 4px rgba(139,92,246,0.2);';
+		selectBtn.textContent = '{{SELECT_THIS_REQUEST}}';
+		selectBtn.onmouseover = function() {
+			this.style.background = 'linear-gradient(135deg,#7c3aed 0%,#6d28d9 100%)';
+			this.style.transform = 'translateY(-1px)';
+			this.style.boxShadow = '0 4px 8px rgba(139,92,246,0.3)';
+		};
+		selectBtn.onmouseout = function() {
+			this.style.background = 'linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%)';
+			this.style.transform = 'translateY(0)';
+			this.style.boxShadow = '0 2px 4px rgba(139,92,246,0.2)';
+		};
+		selectBtn.onclick = function(e) {
+			e.stopPropagation();
+			recordXHRAction(xhrInfo);
+			closeXHRDialog(document.getElementById('__browserwing_xhr_dialog__'));
+		};
+		
+		// 组装
+		item.appendChild(itemHeader);
+		item.appendChild(itemDetails);
+		item.appendChild(selectBtn);
+		
+		return item;
+	};
+	
+	// 提取域名+路径（不带参数），用于回放时匹配
+	var extractDomainAndPath = function(url) {
+		try {
+			var fullUrl = url;
+			
+			// 处理 // 开头的协议相对URL（如 //cdn.example.com/api）
+			if (url.indexOf('//') === 0) {
+				fullUrl = window.location.protocol + url;
+			}
+			// 处理相对路径（不包含域名的路径）
+			else if (url.indexOf('http') !== 0 && url.indexOf('//') !== 0) {
+				// 拼接当前页面的origin
+				if (url.startsWith('/')) {
+					fullUrl = window.location.origin + url;
+				} else {
+					fullUrl = window.location.origin + '/' + url;
+				}
+			}
+			
+			var urlObj = new URL(fullUrl);
+			// 返回 域名+路径（不带参数和hash）
+			// 例如: https://api.example.com/users
+			return urlObj.origin + urlObj.pathname;
+		} catch (e) {
+			console.warn('[BrowserWing] Failed to parse URL:', url, e);
+			// 降级处理：直接去掉参数
+			return url.split('?')[0].split('#')[0];
+		}
+	};
+	
+	// 记录XHR请求为action
+	var recordXHRAction = function(xhrInfo) {
+		var variableName = 'xhr_data_' + window.__recordedActions__.length;
+		
+		// 提取 域名+路径（不带参数），用于回放时匹配
+		var domainAndPath = extractDomainAndPath(xhrInfo.url);
+		
+		var action = {
+			type: 'capture_xhr',
+			timestamp: Date.now(),
+			url: domainAndPath,  // 保存 域名+路径（不带参数）
+			method: xhrInfo.method,
+			status: xhrInfo.status,
+			variable_name: variableName,
+			xhr_id: xhrInfo.id,
+			description: 'Capture XHR: ' + xhrInfo.method + ' ' + domainAndPath
+		};
+		
+		recordAction(action, null, 'capture_xhr');
+		
+		var actionText = '{{XHR_CAPTURED}}: ' + xhrInfo.method + ' ' + domainAndPath;
+		showCurrentAction(actionText);
+		
+		console.log('[BrowserWing] Recorded XHR action:', variableName, 'URL:', domainAndPath);
+	};
+	
+	// 初始化XHR拦截（页面加载时立即开始监听，避免漏掉早期请求）
+	initXHRInterceptor();
+	
 	console.log('[BrowserWing] Recorder initialized successfully');
-	console.log('[BrowserWing] Monitoring: click, input, select, checkbox, radio, contenteditable, scroll');
+	console.log('[BrowserWing] Monitoring: click, input, select, checkbox, radio, contenteditable, scroll, xhr');
 	console.log('[BrowserWing] Extract mode available');
 }

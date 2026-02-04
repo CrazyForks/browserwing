@@ -786,6 +786,14 @@ export default function ScriptManager() {
       newAction.value = '0'
     }
 
+    // 为捕获XHR类型设置默认值
+    if (type === 'capture_xhr') {
+      newAction.method = 'GET'
+      newAction.url = 'https://api.example.com/'
+      newAction.variable_name = `xhr_data_${editingActions.length}`
+      newAction.description = 'Capture XHR request'
+    }
+
     setEditingActions([...editingActions, newAction])
   }
 
@@ -1382,7 +1390,8 @@ export default function ScriptManager() {
                         <div className="grid grid-cols-2 gap-1.5">
                           <button onClick={() => { handleAddAction('extract_text'); setShowFloatingAddActionMenu(false); }} className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors">{t('extract_text')}</button>
                           <button onClick={() => { handleAddAction('extract_html'); setShowFloatingAddActionMenu(false); }} className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors">{t('extract_html')}</button>
-                          <button onClick={() => { handleAddAction('extract_attribute'); setShowFloatingAddActionMenu(false); }} className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors col-span-2">{t('extract_attribute')}</button>
+                          <button onClick={() => { handleAddAction('extract_attribute'); setShowFloatingAddActionMenu(false); }} className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors">{t('extract_attribute')}</button>
+                          <button onClick={() => { handleAddAction('capture_xhr'); setShowFloatingAddActionMenu(false); }} className="px-3 py-2 text-xs text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors">{t('capture_xhr')}</button>
                         </div>
                       </div>
                       <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
@@ -2647,7 +2656,16 @@ export default function ScriptManager() {
               <div className="p-12 text-center text-gray-500 dark:text-gray-400">{t('execution.noRecords')}</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table className="w-full table-fixed">
+                  <colgroup>
+                    <col className="w-16" />
+                    <col className="w-64" />
+                    <col className="w-44" />
+                    <col className="w-24" />
+                    <col className="w-56" />
+                    <col className="w-28" />
+                    <col className="w-44" />
+                  </colgroup>
                   <thead className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th className="px-6 py-3 text-left">
@@ -2663,12 +2681,12 @@ export default function ScriptManager() {
                           )}
                         </button>
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('execution.table.scriptName')}</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('execution.table.startTime')}</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('execution.table.duration')}</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('execution.table.steps')}</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('execution.table.status')}</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('execution.table.actions')}</th>
+                      <th className="px-6 py-3 text-left text-s font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('execution.table.scriptName')}</th>
+                      <th className="px-6 py-3 text-left text-s font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('execution.table.startTime')}</th>
+                      <th className="px-6 py-3 text-left text-s font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('execution.table.duration')}</th>
+                      <th className="px-6 py-3 text-left text-s font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('execution.table.steps')}</th>
+                      <th className="px-6 py-3 text-left text-s font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('execution.table.status')}</th>
+                      <th className="px-6 py-3 text-left text-s font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('execution.table.actions')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -2689,7 +2707,9 @@ export default function ScriptManager() {
                             </button>
                           </td>
                           <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {execution.script_name}
+                            <div className="truncate" title={execution.script_name}>
+                              {execution.script_name}
+                            </div>
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                             {formatDateTime(execution.start_time)}
@@ -2698,11 +2718,11 @@ export default function ScriptManager() {
                             {formatDuration(execution.duration)}
                           </td>
                           <td className="px-6 py-4 text-sm">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1 flex-wrap text-xs">
                               <span className="text-gray-600 dark:text-gray-400">{t('execution.steps.success', { count: execution.success_steps.toString() })}</span>
-                              <span className="text-gray-600 dark:text-gray-400">/</span>
+                              <span className="text-gray-400 dark:text-gray-600">/</span>
                               <span className="text-gray-600 dark:text-gray-400">{t('execution.steps.failed', { count: execution.failed_steps.toString() })}</span>
-                              <span className="text-gray-600 dark:text-gray-400">/</span>
+                              <span className="text-gray-400 dark:text-gray-600">/</span>
                               <span className="text-gray-600 dark:text-gray-400">{t('execution.steps.total', { count: execution.total_steps.toString() })}</span>
                             </div>
                           </td>
@@ -2738,7 +2758,7 @@ export default function ScriptManager() {
                         {expandedExecutionId === execution.id && (
                           <tr>
                             <td colSpan={7} className="px-6 py-4 bg-gray-50 dark:bg-gray-900">
-                              <div className="space-y-4 max-h-96 overflow-y-auto">
+                              <div className="space-y-4 max-h-96 overflow-y-auto w-full overflow-hidden">
                                 <div>
                                   <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('execution.details.executionInfo')}</h4>
                                   <div className="grid grid-cols-2 gap-4 text-sm">
@@ -2762,19 +2782,19 @@ export default function ScriptManager() {
                                 </div>
 
                                 {execution.error_msg && (
-                                  <div>
+                                  <div className="w-full overflow-hidden">
                                     <h4 className="text-sm font-medium text-red-700 mb-2">{t('execution.details.errorInfo')}</h4>
-                                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-h-48 overflow-y-auto">
-                                      <pre className="text-xs text-red-800 whitespace-pre-wrap">{execution.error_msg}</pre>
+                                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-h-48 overflow-auto w-full">
+                                      <pre className="text-xs text-red-800 whitespace-pre-wrap break-all max-w-full" style={{ wordBreak: 'break-word' }}>{execution.error_msg}</pre>
                                     </div>
                                   </div>
                                 )}
 
                                 {execution.extracted_data && Object.keys(execution.extracted_data).length > 0 && (
-                                  <div>
+                                  <div className="w-full overflow-hidden">
                                     <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('execution.details.extractedData')}</h4>
-                                    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 max-h-64 overflow-y-auto">
-                                      <pre className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
+                                    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 max-h-64 overflow-auto w-full">
+                                      <pre className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all max-w-full" style={{ wordBreak: 'break-word' }}>
                                         {JSON.stringify(execution.extracted_data, null, 2)}
                                       </pre>
                                     </div>
@@ -3668,7 +3688,8 @@ function SortableActionItem({ id, action, index, onUpdate, onDelete, onDuplicate
               action.type !== 'switch_tab' &&
               action.type !== 'open_tab' &&
               action.type !== 'switch_active_tab' &&
-              action.type !== 'screenshot' && (
+              action.type !== 'screenshot' &&
+              action.type !== 'capture_xhr' && (
                 <>
                   <div>
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">{t('script.action.selector')}</label>
@@ -3760,6 +3781,50 @@ function SortableActionItem({ id, action, index, onUpdate, onDelete, onDuplicate
                   placeholder="https://example.com"
                 />
               </div>
+            )}
+            {action.type === 'capture_xhr' && (
+              <>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">HTTP Method:</label>
+                  <select
+                    value={action.method || 'GET'}
+                    onChange={(e) => onUpdate(index, 'method', e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                    <option value="PUT">PUT</option>
+                    <option value="DELETE">DELETE</option>
+                    <option value="PATCH">PATCH</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">URL (域名+路径，不带参数):</label>
+                  <input
+                    type="text"
+                    value={action.url || ''}
+                    onChange={(e) => onUpdate(index, 'url', e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg font-mono bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="https://api.example.com/users"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    填写完整的域名+路径，例如 https://api.example.com/users，不需要参数部分
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">变量名:</label>
+                  <input
+                    type="text"
+                    value={action.variable_name || ''}
+                    onChange={(e) => onUpdate(index, 'variable_name', e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg font-mono bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="xhr_data_0"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    响应数据将保存到此变量中，可在后续步骤中使用
+                  </p>
+                </div>
+              </>
             )}
             {action.type === 'sleep' && (
               <div>

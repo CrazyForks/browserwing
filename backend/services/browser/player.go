@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color/palette"
@@ -351,6 +352,7 @@ func getI18nText(key, lang string) string {
 		"action.open_tab":          "打开新标签页",
 		"action.switch_tab":        "切换标签页",
 		"action.switch_active_tab": "切换到活跃标签页",
+		"action.capture_xhr":       "捕获XHR请求",
 		},
 		"zh-TW": {
 			// AI 控制指示器
@@ -379,6 +381,7 @@ func getI18nText(key, lang string) string {
 		"action.open_tab":          "打開新標籤頁",
 		"action.switch_tab":        "切換標籤頁",
 		"action.switch_active_tab": "切換到活躍標籤頁",
+		"action.capture_xhr":       "捕獲XHR請求",
 		},
 		"en": {
 			// AI Control Indicator
@@ -407,6 +410,7 @@ func getI18nText(key, lang string) string {
 		"action.open_tab":          "Open New Tab",
 		"action.switch_tab":        "Switch Tab",
 		"action.switch_active_tab": "Switch to Active Tab",
+		"action.capture_xhr":       "Capture XHR Request",
 		},
 	}
 
@@ -965,6 +969,12 @@ func (p *Player) PlayScript(ctx context.Context, page *rod.Page, script *models.
 	// 初始化步骤列表
 	p.initAIControlSteps(ctx, page, script.Actions)
 
+	// 预先注入XHR拦截器，监听脚本中所有需要捕获的XHR请求
+	// 这样可以避免在执行到capture_xhr action时才开始监听，导致漏掉前面的请求
+	if err := p.injectXHRInterceptorForScript(ctx, page, script.Actions); err != nil {
+		logger.Warn(ctx, "Failed to inject XHR interceptor: %v", err)
+	}
+
 	// 执行每个操作
 	for i, action := range script.Actions {
 		p.currentStepIndex = i
@@ -1178,6 +1188,8 @@ func (p *Player) executeAction(ctx context.Context, page *rod.Page, action model
 		return p.executeKeyboard(ctx, activePage, action)
 	case "screenshot":
 		return p.executeScreenshot(ctx, activePage, action)
+	case "capture_xhr":
+		return p.executeCaptureXHR(ctx, activePage, action)
 	default:
 		logger.Warn(ctx, "Unknown action type: %s", action.Type)
 		return nil
@@ -2836,4 +2848,266 @@ func (p *Player) executeSwitchTab(ctx context.Context, action models.ScriptActio
 	time.Sleep(500 * time.Millisecond)
 
 	return nil
+}
+
+// injectXHRInterceptorForScript 在脚本开始执行时注入XHR拦截器，提前监听所有需要捕获的请求
+func (p *Player) injectXHRInterceptorForScript(ctx context.Context, page *rod.Page, actions []models.ScriptAction) error {
+	// 收集所有需要监听的 capture_xhr action
+	var captureTargets []map[string]string
+	for _, action := range actions {
+		if action.Type == "capture_xhr" && action.URL != "" && action.Method != "" {
+			captureTargets = append(captureTargets, map[string]string{
+				"method": action.Method,
+				"url":    action.URL,
+			})
+		}
+	}
+
+	// 如果没有 capture_xhr action，不需要注入
+	if len(captureTargets) == 0 {
+		logger.Info(ctx, "No capture_xhr actions found, skipping XHR interceptor injection")
+		return nil
+	}
+
+	logger.Info(ctx, "Injecting XHR interceptor for %d capture targets", len(captureTargets))
+
+	// 将目标列表转换为JSON
+	targetsJSON, err := json.Marshal(captureTargets)
+	if err != nil {
+		return fmt.Errorf("failed to marshal capture targets: %w", err)
+	}
+
+	// 注入拦截器脚本
+	_, err = page.Eval(`(captureTargetsJSON) => {
+		if (window.__xhrCaptureInstalled__) {
+			console.log('[BrowserWing Player] XHR interceptor already installed');
+			return true;
+		}
+		
+		window.__xhrCaptureInstalled__ = true;
+		window.__capturedXHRData__ = {};
+		
+		// 解析需要监听的目标列表
+		var captureTargets = JSON.parse(captureTargetsJSON);
+		var targetKeys = new Set();
+		captureTargets.forEach(function(target) {
+			var key = target.method + '|' + target.url;
+			targetKeys.add(key);
+			console.log('[BrowserWing Player] Will capture:', key);
+		});
+		
+		// 辅助函数：提取域名+路径（不带参数）
+		var extractDomainAndPath = function(url) {
+			try {
+				var fullUrl = url;
+				
+				// 处理 // 开头的协议相对URL（如 //cdn.example.com/api）
+				if (url.indexOf('//') === 0) {
+					fullUrl = window.location.protocol + url;
+				}
+				// 处理相对路径（不包含域名的路径）
+				else if (url.indexOf('http') !== 0 && url.indexOf('//') !== 0) {
+					// 拼接当前页面的origin
+					if (url.startsWith('/')) {
+						fullUrl = window.location.origin + url;
+					} else {
+						fullUrl = window.location.origin + '/' + url;
+					}
+				}
+				
+				var urlObj = new URL(fullUrl);
+				// 返回 域名+路径（不带参数和hash）
+				return urlObj.origin + urlObj.pathname;
+			} catch (e) {
+				console.warn('[BrowserWing Player] Failed to parse URL:', url, e);
+				return url.split('?')[0].split('#')[0];
+			}
+		};
+		
+		// 拦截XMLHttpRequest
+		var originalXHROpen = XMLHttpRequest.prototype.open;
+		var originalXHRSend = XMLHttpRequest.prototype.send;
+		
+		XMLHttpRequest.prototype.open = function(method, url) {
+			this.__xhrInfo__ = {
+				method: method,
+				url: url,
+				domainAndPath: extractDomainAndPath(url)
+			};
+			return originalXHROpen.apply(this, arguments);
+		};
+		
+		XMLHttpRequest.prototype.send = function(body) {
+			var xhr = this;
+			var xhrInfo = xhr.__xhrInfo__;
+			
+			if (xhrInfo) {
+				xhr.addEventListener('readystatechange', function() {
+					if (xhr.readyState === 4) {
+						var key = xhrInfo.method + '|' + xhrInfo.domainAndPath;
+						
+						// 只存储我们需要监听的请求
+						if (!targetKeys.has(key)) {
+							return;
+						}
+						
+						var response = null;
+						
+						try {
+							if (xhr.responseType === '' || xhr.responseType === 'text') {
+								response = xhr.responseText;
+							} else if (xhr.responseType === 'json') {
+								response = xhr.response;
+							} else {
+								response = '[Binary Data]';
+							}
+						} catch (e) {
+							response = '[Error reading response]';
+						}
+						
+						window.__capturedXHRData__[key] = {
+							method: xhrInfo.method,
+							url: xhrInfo.domainAndPath,
+							status: xhr.status,
+							statusText: xhr.statusText,
+							response: response,
+							timestamp: Date.now()
+						};
+						console.log('[BrowserWing Player] Captured XHR:', key, 'Status:', xhr.status);
+					}
+				});
+			}
+			
+			return originalXHRSend.apply(this, arguments);
+		};
+		
+		// 拦截Fetch API
+		var originalFetch = window.fetch;
+		window.fetch = function(input, init) {
+			var url = typeof input === 'string' ? input : input.url;
+			var method = (init && init.method) || 'GET';
+			var domainAndPath = extractDomainAndPath(url);
+			var key = method.toUpperCase() + '|' + domainAndPath;
+			
+			// 只拦截我们需要监听的请求
+			if (!targetKeys.has(key)) {
+				return originalFetch.apply(this, arguments);
+			}
+			
+			return originalFetch.apply(this, arguments).then(function(response) {
+				var clonedResponse = response.clone();
+				var contentType = response.headers.get('content-type') || '';
+				
+				if (contentType.indexOf('application/json') !== -1) {
+					clonedResponse.json().then(function(data) {
+						window.__capturedXHRData__[key] = {
+							method: method.toUpperCase(),
+							url: domainAndPath,
+							status: response.status,
+							statusText: response.statusText,
+							response: data,
+							timestamp: Date.now()
+						};
+						console.log('[BrowserWing Player] Captured Fetch:', key);
+					}).catch(function(e) {
+						console.warn('[BrowserWing Player] Failed to parse Fetch response:', e);
+					});
+				} else if (contentType.indexOf('text/') !== -1) {
+					clonedResponse.text().then(function(text) {
+						window.__capturedXHRData__[key] = {
+							method: method.toUpperCase(),
+							url: domainAndPath,
+							status: response.status,
+							statusText: response.statusText,
+							response: text,
+							timestamp: Date.now()
+						};
+						console.log('[BrowserWing Player] Captured Fetch:', key);
+					}).catch(function(e) {
+						console.warn('[BrowserWing Player] Failed to read Fetch response:', e);
+					});
+				}
+				
+				return response;
+			});
+		};
+		
+		console.log('[BrowserWing Player] XHR capture script installed, monitoring', targetKeys.size, 'targets');
+		return true;
+	}`, string(targetsJSON))
+
+	if err != nil {
+		return fmt.Errorf("failed to inject XHR interceptor: %w", err)
+	}
+
+	logger.Info(ctx, "✓ XHR interceptor injected successfully")
+	return nil
+}
+
+// executeCaptureXHR 执行捕获XHR请求操作（回放时等待并获取匹配的XHR响应数据）
+func (p *Player) executeCaptureXHR(ctx context.Context, page *rod.Page, action models.ScriptAction) error {
+	domainAndPath := action.URL
+	method := action.Method
+	if domainAndPath == "" || method == "" {
+		return fmt.Errorf("capture_xhr action requires url and method")
+	}
+
+	logger.Info(ctx, "Capturing XHR request: %s %s (domain+path, ignoring query params)", method, domainAndPath)
+
+	// XHR拦截器已经在脚本开始时注入（injectXHRInterceptorForScript），
+	// 这里只需要等待和查找数据，不再重复注入
+
+	// 等待指定的XHR请求完成（轮询检查）
+	// 使用method + domainAndPath（不带参数）作为匹配key
+	key := method + "|" + domainAndPath
+	maxWaitTime := 30 * time.Second
+	pollInterval := 500 * time.Millisecond
+	startTime := time.Now()
+
+	logger.Info(ctx, "Waiting for XHR request to complete (domain+path matching): %s", key)
+
+	for {
+		// 检查是否超时
+		if time.Since(startTime) > maxWaitTime {
+			return fmt.Errorf("timeout waiting for XHR request: %s %s", method, domainAndPath)
+		}
+
+		// 检查是否已捕获到目标请求
+		result, err := page.Eval(`(key) => {
+			if (window.__capturedXHRData__ && window.__capturedXHRData__[key]) {
+				return window.__capturedXHRData__[key];
+			}
+			return null;
+		}`, key)
+		if err != nil {
+			logger.Warn(ctx, "Failed to check captured XHR data: %v", err)
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		// 如果找到了匹配的请求
+		if result != nil && !result.Value.Nil() {
+			// 解析响应数据
+			var xhrData map[string]interface{}
+			jsonData, _ := json.Marshal(result.Value)
+			if err := json.Unmarshal(jsonData, &xhrData); err != nil {
+				logger.Warn(ctx, "Failed to parse XHR data: %v", err)
+				return fmt.Errorf("failed to parse XHR response: %w", err)
+			}
+
+			// 存储抓取的数据
+			varName := action.VariableName
+			if varName == "" {
+				varName = fmt.Sprintf("xhr_data_%d", len(p.extractedData))
+			}
+			p.extractedData[varName] = xhrData["response"]
+
+			logger.Info(ctx, "✓ XHR request captured successfully: %s = %v", varName, xhrData["status"])
+			logger.Info(ctx, "Response status: %v %v", xhrData["status"], xhrData["statusText"])
+			return nil
+		}
+
+		// 等待后重试
+		time.Sleep(pollInterval)
+	}
 }
