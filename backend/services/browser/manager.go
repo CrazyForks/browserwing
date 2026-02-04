@@ -1194,7 +1194,7 @@ func (m *Manager) checkInPageRecordingRequests(ctx context.Context, page *rod.Pa
 				}
 
 				reqType, _ := resultMap["type"].(string)
-				
+
 				if reqType == "start_recording" {
 					logger.Info(ctx, "Detected in-page recording start request")
 
@@ -1223,15 +1223,15 @@ func (m *Manager) checkInPageRecordingRequests(ctx context.Context, page *rod.Pa
 					}
 				} else if reqType == "screenshot" {
 					logger.Info(ctx, "Detected in-page screenshot request")
-					
+
 					// 提取截图请求数据（仅用于日志）
 					data, _ := resultMap["data"].(map[string]interface{})
 					mode, _ := data["mode"].(string)
-					
+
 					if mode == "" {
 						mode = "viewport"
 					}
-					
+
 					// 注意：不在后端添加 action，因为前端已经通过 recordAction() 添加了
 					// 停止录制时会从前端的 window.__recordedActions__ 同步过来
 					// 这样避免重复添加截图操作

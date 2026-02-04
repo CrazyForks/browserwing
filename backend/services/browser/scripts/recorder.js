@@ -309,48 +309,34 @@ if (window.__browserwingRecorder__) {
 			}
 		};
 		
-	var aiExtractBtn = document.createElement('button');
-	aiExtractBtn.id = '__browserwing_ai_extract_btn__';
-	aiExtractBtn.style.cssText = 'flex:1;padding:8px 14px;background:#18181b;color:white;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-	aiExtractBtn.textContent = '{{AI_EXTRACT}}';
-	aiExtractBtn.onmouseover = function() {
+	// AI模式按钮（合并AI抓取和AI填表）
+	var aiModeBtn = document.createElement('button');
+	aiModeBtn.id = '__browserwing_ai_mode_btn__';
+	aiModeBtn.style.cssText = 'flex:1;padding:8px 14px;background:#18181b;color:white;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;';
+	aiModeBtn.textContent = '{{AI_MODE}}';
+	aiModeBtn.onmouseover = function() {
 		this.style.background = '#27272a';
 		this.style.borderColor = 'rgba(255,255,255,0.15)';
 		this.style.transform = 'translateY(-1px)';
 		this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.25)';
 	};
-	aiExtractBtn.onmouseout = function() {
+	aiModeBtn.onmouseout = function() {
 		this.style.background = '#18181b';
 		this.style.borderColor = 'rgba(255,255,255,0.1)';
 		this.style.transform = 'translateY(0)';
 		this.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2)';
 	};
-		aiExtractBtn.onclick = function() {
-			if (!panel.__isDragging) {
-				toggleAIExtractMode();
-			}
-		};
+	aiModeBtn.onclick = function(e) {
+		if (panel.__isDragging) return;
 		
-	var aiFormFillBtn = document.createElement('button');
-	aiFormFillBtn.id = '__browserwing_ai_formfill_btn__';
-	aiFormFillBtn.style.cssText = 'flex:1;padding:8px 14px;background:#18181b;color:white;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:-0.01em;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);box-shadow:0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-	aiFormFillBtn.textContent = '{{AI_FORMFILL}}';
-	aiFormFillBtn.onmouseover = function() {
-		this.style.background = '#27272a';
-		this.style.borderColor = 'rgba(255,255,255,0.15)';
-		this.style.transform = 'translateY(-1px)';
-		this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.25)';
-	};
-	aiFormFillBtn.onmouseout = function() {
-		this.style.background = '#18181b';
-		this.style.borderColor = 'rgba(255,255,255,0.1)';
-		this.style.transform = 'translateY(0)';
-		this.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2)';
-	};
-	aiFormFillBtn.onclick = function() {
-		if (!panel.__isDragging) {
-			toggleAIFormFillMode();
-		}
+		// 显示AI模式选择菜单
+		var aiModeMenu = window.__recorderUI__.aiModeMenu;
+		aiModeMenu.style.display = 'block';
+		
+		// 计算菜单位置（在按钮下方）
+		var btnRect = this.getBoundingClientRect();
+		aiModeMenu.style.left = btnRect.left + 'px';
+		aiModeMenu.style.top = (btnRect.bottom + 5) + 'px';
 	};
 	
 	// 截图按钮 - 黑白灰极简风格
@@ -420,10 +406,9 @@ if (window.__browserwingRecorder__) {
 		}
 	};
 	
-	// 第一排：抓取、AI提取和AI填表（3个按钮）
+	// 第一排：抓取和AI模式（2个按钮）
 	buttonRow1.appendChild(extractBtn);
-	buttonRow1.appendChild(aiExtractBtn);
-	buttonRow1.appendChild(aiFormFillBtn);
+	buttonRow1.appendChild(aiModeBtn);
 	
 	// 第二排：截图和XHR监听（2个按钮）
 	buttonRow2.appendChild(screenshotBtn);
@@ -615,6 +600,37 @@ if (window.__browserwingRecorder__) {
 			screenshotMenu.appendChild(screenshotItem);
 		}
 		
+		// 创建AI模式选择菜单
+		var aiModeMenu = document.createElement('div');
+		aiModeMenu.id = '__browserwing_ai_mode_menu__';
+		aiModeMenu.style.cssText = 'display:none;position:fixed;background:white;border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.04);z-index:1000000;padding:6px;min-width:180px;backdrop-filter:blur(10px);';
+		
+		var aiModeMenuItems = [
+			{mode: 'extract', label: '{{AI_EXTRACT}}'},
+			{mode: 'formfill', label: '{{AI_FORMFILL}}'}
+		];
+		
+		for (var k = 0; k < aiModeMenuItems.length; k++) {
+			var aiModeItem = document.createElement('div');
+			aiModeItem.setAttribute('data-mode', aiModeMenuItems[k].mode);
+			aiModeItem.style.cssText = 'padding:10px 14px;cursor:pointer;font-size:13px;font-weight:600;border-radius:8px;color:#334155;letter-spacing:-0.01em;transition:all 0.2s cubic-bezier(0.4,0,0.2,1);';
+			aiModeItem.textContent = aiModeMenuItems[k].label;
+			aiModeItem.onmouseover = function() { this.style.background = '#f1f5f9'; this.style.color = '#0f172a'; };
+			aiModeItem.onmouseout = function() { this.style.background = 'transparent'; this.style.color = '#334155'; };
+			
+			aiModeItem.onclick = function() {
+				var mode = this.getAttribute('data-mode');
+				aiModeMenu.style.display = 'none';
+				if (mode === 'extract') {
+					toggleAIExtractMode();
+				} else if (mode === 'formfill') {
+					toggleAIFormFillMode();
+				}
+			};
+			
+			aiModeMenu.appendChild(aiModeItem);
+		}
+		
 		// 截图处理函数
 		function handleScreenshot(mode) {
 			if (mode === 'region') {
@@ -756,6 +772,7 @@ if (window.__browserwingRecorder__) {
 		document.body.appendChild(panel);
 		document.body.appendChild(menu);
 		document.body.appendChild(screenshotMenu);
+		document.body.appendChild(aiModeMenu);
 		
 	window.__recorderUI__ = {
 		panel: panel,
@@ -764,8 +781,7 @@ if (window.__browserwingRecorder__) {
 		statusText: statusText,
 		actionCount: actionCount,
 		extractBtn: extractBtn,
-		aiExtractBtn: aiExtractBtn,
-		aiFormFillBtn: aiFormFillBtn,
+		aiModeBtn: aiModeBtn,
 		screenshotBtn: screenshotBtn,
 		xhrBtn: xhrBtn,
 		actionList: actionList,
@@ -773,6 +789,7 @@ if (window.__browserwingRecorder__) {
 		currentAction: currentAction,
 		menu: menu,
 		screenshotMenu: screenshotMenu,
+		aiModeMenu: aiModeMenu,
 		stopRecordingBtn: stopRecordingBtn
 	};
 	};
@@ -2821,6 +2838,7 @@ if (window.__browserwingRecorder__) {
 		if (target.closest && target.closest('#__browserwing_recorder_panel__')) return;
 		if (target.closest && target.closest('#__browserwing_extract_menu__')) return;
 		if (target.closest && target.closest('#__browserwing_screenshot_menu__')) return;
+		if (target.closest && target.closest('#__browserwing_ai_mode_menu__')) return;
 		if (target.closest && target.closest('#__browserwing_selection_overlay__')) return;
 		if (target.closest && target.closest('#__browserwing_preview_dialog__')) return;
 			
@@ -3463,6 +3481,15 @@ if (window.__browserwingRecorder__) {
 				if (!e.target.closest('#__browserwing_screenshot_menu__') && 
 				    !e.target.closest('#__browserwing_screenshot_btn__')) {
 					screenshotMenu.style.display = 'none';
+				}
+			}
+			
+			var aiModeMenu = window.__recorderUI__.aiModeMenu;
+			if (aiModeMenu && aiModeMenu.style.display !== 'none') {
+				// 如果点击的不是AI模式菜单项，关闭菜单
+				if (!e.target.closest('#__browserwing_ai_mode_menu__') && 
+				    !e.target.closest('#__browserwing_ai_mode_btn__')) {
+					aiModeMenu.style.display = 'none';
 				}
 			}
 		}
