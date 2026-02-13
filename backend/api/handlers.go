@@ -723,11 +723,28 @@ func (h *Handler) DeleteScript(c *gin.Context) {
 // PlayScript 回放脚本
 func (h *Handler) PlayScript(c *gin.Context) {
 	id := c.Param("id")
+	instanceID := c.Query("instance_id")
+	if instanceID == "" {
+		instanceID = c.GetHeader("X-Instance-ID")
+	}
+
+	// 解析请求体中的参数
+	var req struct {
+		Params     map[string]string `json:"params"`
+		InstanceID string            `json:"instance_id"` // 指定实例ID，空字符串表示使用当前实例
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// 如果没有请求体或解析失败,使用空参数
+		req.Params = make(map[string]string)
+	}
+	if instanceID == "" && req.InstanceID != "" {
+		instanceID = req.InstanceID
+	}
 
 	// 检查浏览器是否运行
-	if !h.browserManager.IsRunning() {
+	if !h.browserManager.IsInstanceRunning(instanceID) {
 		logger.Info(c, "Browser not running, starting...")
-		if err := h.browserManager.Start(c); err != nil {
+		if err := h.browserManager.StartInstance(c, instanceID); err != nil {
 			logger.Error(c.Request.Context(), "Failed to start browser: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "error.playScriptFailed"})
 			return
@@ -739,16 +756,6 @@ func (h *Handler) PlayScript(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "error.scriptNotFound"})
 		return
-	}
-
-	// 解析请求体中的参数
-	var req struct {
-		Params     map[string]string `json:"params"`
-		InstanceID string            `json:"instance_id"` // 指定实例ID，空字符串表示使用当前实例
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		// 如果没有请求体或解析失败,使用空参数
-		req.Params = make(map[string]string)
 	}
 
 	// 创建脚本副本并合并参数
@@ -5747,9 +5754,9 @@ func (h *Handler) ListScheduledTasks(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"tasks": tasks,
-		"total": total,
-		"page":  page,
+		"tasks":     tasks,
+		"total":     total,
+		"page":      page,
 		"page_size": pageSize,
 	})
 }
@@ -5769,7 +5776,7 @@ func (h *Handler) GetScheduledTask(c *gin.Context) {
 // UpdateScheduledTask 更新定时任务
 func (h *Handler) UpdateScheduledTask(c *gin.Context) {
 	id := c.Param("id")
-	
+
 	// 检查任务是否存在
 	existingTask, err := h.db.GetScheduledTask(id)
 	if err != nil {
@@ -5787,7 +5794,7 @@ func (h *Handler) UpdateScheduledTask(c *gin.Context) {
 	task.ID = id
 	task.CreatedAt = existingTask.CreatedAt
 	task.UpdatedAt = time.Now()
-	
+
 	// 保持统计数据
 	task.ExecutionCount = existingTask.ExecutionCount
 	task.SuccessCount = existingTask.SuccessCount
@@ -5893,7 +5900,7 @@ func (h *Handler) DeleteScheduledTask(c *gin.Context) {
 // ToggleScheduledTask 启用/禁用定时任务
 func (h *Handler) ToggleScheduledTask(c *gin.Context) {
 	id := c.Param("id")
-	
+
 	task, err := h.db.GetScheduledTask(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "error.taskNotFound"})

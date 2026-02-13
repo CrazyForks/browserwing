@@ -577,8 +577,21 @@ func (m *Manager) IsRunning() bool {
 		return m.isRunning // 向后兼容：如果没有实例ID，使用旧逻辑
 	}
 
-	// 检查当前实例是否真的在运行
-	runtime, exists := m.instances[m.currentInstanceID]
+	return m.IsInstanceRunning(m.currentInstanceID)
+}
+
+func (m *Manager) IsInstanceRunning(instanceID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if instanceID == "" && m.currentInstanceID == "" {
+		return m.isRunning // 向后兼容：如果没有实例ID，使用旧逻辑
+	}
+	if instanceID == "" {
+		instanceID = m.currentInstanceID
+	}
+
+	runtime, exists := m.instances[instanceID]
 	return exists && runtime != nil && runtime.browser != nil
 }
 
