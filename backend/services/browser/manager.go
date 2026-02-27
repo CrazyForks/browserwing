@@ -768,6 +768,9 @@ func (m *Manager) OpenPage(url string, language string, instanceID string, norec
 		}
 	}()
 
+	// 自动补全 URL schema
+	url = normalizeURLSchema(url)
+
 	var noRecord bool
 	if len(norecord) > 0 {
 		noRecord = norecord[0]
@@ -1533,6 +1536,38 @@ func (m *Manager) getDefaultBrowserConfig() *models.BrowserConfig {
 // ==================== 多实例管理 ====================
 
 // checkBrowserConnection 检查浏览器连接是否仍然有效
+// normalizeURLSchema 自动补全 URL 的 schema（http/https）
+// localhost 和 127.0.0.1 补 http，其余补 https
+func normalizeURLSchema(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return rawURL
+	}
+
+	// 已经有 schema 则不处理
+	lower := strings.ToLower(rawURL)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") ||
+		strings.HasPrefix(lower, "file://") || strings.HasPrefix(lower, "data:") ||
+		strings.HasPrefix(lower, "about:") || strings.HasPrefix(lower, "chrome://") {
+		return rawURL
+	}
+
+	// 提取 host 部分（去掉 path/port）
+	host := rawURL
+	if idx := strings.Index(host, "/"); idx != -1 {
+		host = host[:idx]
+	}
+	if idx := strings.Index(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+	host = strings.ToLower(host)
+
+	if host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" || host == "::1" {
+		return "http://" + rawURL
+	}
+	return "https://" + rawURL
+}
+
 func checkBrowserConnection(browser *rod.Browser) error {
 	if browser == nil {
 		return fmt.Errorf("browser is nil")
