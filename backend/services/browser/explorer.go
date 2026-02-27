@@ -12,6 +12,7 @@ import (
 
 	"github.com/browserwing/browserwing/models"
 	"github.com/browserwing/browserwing/pkg/logger"
+	"github.com/browserwing/browserwing/storage"
 	"github.com/go-rod/rod"
 	"github.com/google/uuid"
 )
@@ -55,13 +56,15 @@ type Explorer struct {
 	browserManager *Manager
 	agentManager   AgentManagerInterface
 	execRecorder   ExecutorRecorderInterface
+	db             *storage.BoltDB
 }
 
 // NewExplorer creates a new Explorer instance
-func NewExplorer(browserMgr *Manager) *Explorer {
+func NewExplorer(browserMgr *Manager, db *storage.BoltDB) *Explorer {
 	return &Explorer{
 		sessions:       make(map[string]*ExploreSession),
 		browserManager: browserMgr,
+		db:             db,
 	}
 }
 
@@ -449,6 +452,19 @@ func (exp *Explorer) cleanupStaleChromeLocks(ctx context.Context) {
 	}
 }
 
+// getExplorerPromptContent loads the AI Explorer system prompt from DB, falling back to the default.
+func (exp *Explorer) getExplorerPromptContent(ctx context.Context) string {
+	if exp.db != nil {
+		dbPrompt, err := exp.db.GetPrompt(models.SystemPromptAIExplorerID)
+		if err == nil && dbPrompt != nil {
+			return dbPrompt.Content
+		}
+		logger.Warn(ctx, "[Explorer] Failed to load AI Explorer prompt from DB, using default: %v", err)
+	}
+	// Fallback to hardcoded default
+	return models.SystemPromptAIExplorer.Content
+}
+
 // buildExplorationPrompt constructs the prompt for AI exploration
 func (exp *Explorer) buildExplorationPrompt(ctx context.Context, session *ExploreSession) string {
 	var sb strings.Builder
@@ -461,8 +477,11 @@ func (exp *Explorer) buildExplorationPrompt(ctx context.Context, session *Explor
 		}
 	}
 
-	sb.WriteString("You are a browser automation agent. Your task is to complete a specific objective by operating a web browser.\n")
-	sb.WriteString("All your browser operations will be recorded and converted into a replayable automation script.\n\n")
+	// Load the base prompt content from DB (user-customizable)
+	sb.WriteString(exp.getExplorerPromptContent(ctx))
+	sb.WriteString("\n\n")
+
+	// Append dynamic context
 	sb.WriteString("## Current State\n")
 	if currentURL != "" {
 		sb.WriteString(fmt.Sprintf("- Current page URL: %s\n", currentURL))
@@ -470,55 +489,7 @@ func (exp *Explorer) buildExplorationPrompt(ctx context.Context, session *Explor
 	sb.WriteString("\n")
 	sb.WriteString("## Your Objective\n")
 	sb.WriteString(session.TaskDesc)
-	sb.WriteString("\n\n")
-	sb.WriteString("## Instructions\n")
-	sb.WriteString("1. First, use browser_snapshot to understand the current page structure.\n")
-	sb.WriteString("2. Perform actions step-by-step to complete the objective using the available browser tools.\n")
-	sb.WriteString("3. After each action, verify the result before proceeding.\n")
-	sb.WriteString("4. Only perform actions that directly contribute to the objective. Avoid unnecessary exploration.\n")
-	sb.WriteString("5. If an element is not found, try scrolling or waiting before retrying.\n")
-	sb.WriteString("6. When the objective is fully completed, respond with TASK_COMPLETED followed by a brief summary.\n")
-	sb.WriteString("7. If the task cannot be completed, respond with TASK_FAILED followed by the reason.\n")
-	sb.WriteString("8. Keep your actions efficient - minimize the number of tool calls needed.\n\n")
-	sb.WriteString("## Important: Tool Selection Guidelines\n")
-	sb.WriteString("Your operations will be recorded into a script. The following tools produce replayable script actions:\n")
-	sb.WriteString("- browser_navigate: Navigate to a URL\n")
-	sb.WriteString("- browser_click: Click on an element\n")
-	sb.WriteString("- browser_type: Type text into an input field\n")
-	sb.WriteString("- browser_select: Select a dropdown option\n")
-	sb.WriteString("- browser_press_key: Press a keyboard key (e.g., Enter, Tab, Escape)\n")
-	sb.WriteString("- browser_evaluate: Execute JavaScript code on the page. **Use this for any task that requires running JS**, such as extracting page data, manipulating DOM, or executing custom logic.\n\n")
-	sb.WriteString("The following tools are diagnostic/read-only and will NOT be included in the generated script:\n")
-	sb.WriteString("- browser_snapshot: Read page accessibility structure (use for understanding the page, but it won't appear in the script)\n")
-	sb.WriteString("- browser_extract: Extract page content (read-only, not recorded). **If you need to extract data via JS, use browser_evaluate instead.**\n")
-	sb.WriteString("- browser_take_screenshot: Take a screenshot (diagnostic only)\n\n")
-	sb.WriteString("Prefer browser_evaluate over browser_extract when the task involves running JavaScript or extracting structured data.\n\n")
-
-	sb.WriteString("## JavaScript Data Extraction Guide\n")
-	sb.WriteString("When the task involves extracting structured data from a web page, use browser_evaluate with well-crafted JavaScript. Follow these rules:\n")
-	sb.WriteString("1. Use Immediately Invoked Function Expression (IIFE) format: (() => { ... })()\n")
-	sb.WriteString("2. Use native DOM methods like document.querySelectorAll — do NOT use jQuery.\n")
-	sb.WriteString("3. Return an array of objects with meaningful field names (title, url, image, description, author, etc.).\n")
-	sb.WriteString("4. Handle missing elements gracefully with optional chaining (?.) or conditional checks.\n")
-	sb.WriteString("5. Filter out invalid data: skip items where essential fields (title, url) are empty.\n")
-	sb.WriteString("6. Before writing the JS, use browser_snapshot to understand the page DOM structure first.\n")
-	sb.WriteString("7. Look for repeating patterns (list items, cards, rows) and target their CSS selectors.\n\n")
-	sb.WriteString("Example extraction code pattern:\n")
-	sb.WriteString("```javascript\n")
-	sb.WriteString("(() => {\n")
-	sb.WriteString("  const items = [];\n")
-	sb.WriteString("  document.querySelectorAll('.video-card').forEach(el => {\n")
-	sb.WriteString("    const item = {\n")
-	sb.WriteString("      title: el.querySelector('.title')?.textContent?.trim() || '',\n")
-	sb.WriteString("      url: el.querySelector('a')?.href || '',\n")
-	sb.WriteString("      image: el.querySelector('img')?.src || ''\n")
-	sb.WriteString("    };\n")
-	sb.WriteString("    if (item.title && item.url) items.push(item);\n")
-	sb.WriteString("  });\n")
-	sb.WriteString("  return items;\n")
-	sb.WriteString("})()\n")
-	sb.WriteString("```\n\n")
-	sb.WriteString("IMPORTANT: Always inspect the page structure first (via browser_snapshot), then write targeted JS. Do NOT blindly use browser_extract for data extraction tasks.\n")
+	sb.WriteString("\n")
 
 	return sb.String()
 }

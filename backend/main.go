@@ -164,7 +164,7 @@ func main() {
 	browserManager.SetAgentManager(agentManager)
 
 	// 初始化 AI 探索器
-	explorer := browser.NewExplorer(browserManager)
+	explorer := browser.NewExplorer(browserManager, db)
 	explorer.SetAgentManager(agentManager)
 	explorer.SetExecutorRecorder(mcpServer.GetExecutor())
 	log.Println("✓ AI Explorer initialized successfully")
