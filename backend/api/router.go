@@ -296,8 +296,14 @@ func SetupRouter(handler *Handler, agentHandler interface{}, frontendFS fs.FS, e
 			executorAPI.POST("/close-page", handler.ExecutorClosePage)                // 关闭当前页面
 		}
 
-		// AI 探索（自主生成脚本）
-		explore := api.Group("/ai-explore")
+	// Admin Skill 导出
+	admin := api.Group("/admin")
+	{
+		admin.GET("/export/skill", handler.ExportAdminSkill) // 导出 BrowserWing Admin SKILL.md
+	}
+
+	// AI 探索（自主生成脚本）
+	explore := api.Group("/ai-explore")
 		{
 			explore.POST("/start", handler.StartExploration)
 			explore.GET("/:id/stream", handler.StreamExploration)

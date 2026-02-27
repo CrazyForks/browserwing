@@ -6017,3 +6017,421 @@ func (h *Handler) BatchDeleteTaskExecutions(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "success.executionsDeleted", "count": len(req.IDs)})
 }
+
+// ============= BrowserWing Admin Skill =============
+
+// ExportAdminSkill 导出 BrowserWing Admin Skill (SKILL.md)
+func (h *Handler) ExportAdminSkill(c *gin.Context) {
+	host := c.Request.Host
+	skillContent := generateAdminSkillMD(host)
+	fileName := fmt.Sprintf("BROWSERWING_ADMIN_SKILL_%s.md", time.Now().Format("20060102150405"))
+
+	c.Header("Content-Type", "text/markdown; charset=utf-8")
+	c.Header("Content-Disposition", "attachment; filename="+fileName)
+	c.String(http.StatusOK, skillContent)
+}
+
+// generateAdminSkillMD 生成 BrowserWing Admin Skill 的 SKILL.md 内容
+func generateAdminSkillMD(host string) string {
+	var sb strings.Builder
+	baseURL := fmt.Sprintf("http://%s/api/v1", host)
+
+	// YAML Frontmatter
+	sb.WriteString("---\n")
+	sb.WriteString("name: browserwing-admin\n")
+	sb.WriteString("description: Manage and operate BrowserWing — an intelligent browser automation platform. Install dependencies, configure LLM, create/manage/execute automation scripts, use AI-driven exploration to generate scripts, browse the script marketplace, and troubleshoot issues.\n")
+	sb.WriteString("---\n\n")
+
+	// ===== Overview =====
+	sb.WriteString("# BrowserWing Admin Skill\n\n")
+	sb.WriteString("## Overview\n\n")
+	sb.WriteString("BrowserWing is an intelligent browser automation platform that allows you to:\n")
+	sb.WriteString("- Record, create, and replay browser automation scripts\n")
+	sb.WriteString("- Use AI to autonomously explore websites and generate replayable scripts\n")
+	sb.WriteString("- Execute scripts via HTTP API or MCP protocol\n")
+	sb.WriteString("- Manage LLM configurations for AI-powered features\n\n")
+	sb.WriteString(fmt.Sprintf("**API Base URL:** `%s`\n\n", baseURL))
+	sb.WriteString("**Authentication:** Use `X-BrowserWing-Key: <api-key>` header or `Authorization: Bearer <token>`\n\n")
+
+	// ===== 1. Installation & Prerequisites =====
+	sb.WriteString("---\n\n")
+	sb.WriteString("## 1. Installing Google Chrome (Prerequisite)\n\n")
+	sb.WriteString("BrowserWing requires Google Chrome to be installed on the host machine.\n\n")
+
+	sb.WriteString("### Linux (Debian/Ubuntu)\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString("wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -\n")
+	sb.WriteString("echo \"deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main\" | sudo tee /etc/apt/sources.list.d/google-chrome.list\n")
+	sb.WriteString("sudo apt-get update\n")
+	sb.WriteString("sudo apt-get install -y google-chrome-stable\n")
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### macOS\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString("brew install --cask google-chrome\n")
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Windows\n")
+	sb.WriteString("Download and install from: https://www.google.com/chrome/\n\n")
+
+	sb.WriteString("### Verify Installation\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString("google-chrome --version\n")
+	sb.WriteString("# or on macOS:\n")
+	sb.WriteString("# /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --version\n")
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Using Remote Chrome (Alternative)\n")
+	sb.WriteString("If Chrome is running on a remote machine with debugging enabled:\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString("google-chrome --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 --no-sandbox\n")
+	sb.WriteString("```\n")
+	sb.WriteString("Then configure BrowserWing's `config.toml`:\n")
+	sb.WriteString("```toml\n")
+	sb.WriteString("[browser]\n")
+	sb.WriteString("control_url = 'http://<remote-host>:9222'\n")
+	sb.WriteString("```\n\n")
+
+	// ===== 2. LLM Configuration =====
+	sb.WriteString("---\n\n")
+	sb.WriteString("## 2. LLM Configuration\n\n")
+	sb.WriteString("AI features (AI Explorer, Agent chat, smart extraction) require an LLM configuration.\n\n")
+
+	sb.WriteString("### List LLM Configs\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET '%s/llm-configs'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Add LLM Config\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X POST '%s/llm-configs' \\\n", baseURL))
+	sb.WriteString("  -H 'Content-Type: application/json' \\\n")
+	sb.WriteString("  -d '{\n")
+	sb.WriteString("    \"name\": \"my-openai\",\n")
+	sb.WriteString("    \"provider\": \"openai\",\n")
+	sb.WriteString("    \"api_key\": \"sk-xxx\",\n")
+	sb.WriteString("    \"model\": \"gpt-4o\",\n")
+	sb.WriteString("    \"base_url\": \"https://api.openai.com/v1\",\n")
+	sb.WriteString("    \"is_active\": true,\n")
+	sb.WriteString("    \"is_default\": true\n")
+	sb.WriteString("  }'\n")
+	sb.WriteString("```\n")
+	sb.WriteString("**Supported providers:** `openai`, `anthropic`, `deepseek`, or any OpenAI-compatible endpoint.\n\n")
+
+	sb.WriteString("### Test LLM Config\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X POST '%s/llm-configs/test' \\\n", baseURL))
+	sb.WriteString("  -H 'Content-Type: application/json' \\\n")
+	sb.WriteString("  -d '{\"name\": \"my-openai\"}'\n")
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Update LLM Config\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X PUT '%s/llm-configs/<config-id>' \\\n", baseURL))
+	sb.WriteString("  -H 'Content-Type: application/json' \\\n")
+	sb.WriteString("  -d '{\"api_key\": \"sk-new-key\", \"model\": \"gpt-4o-mini\"}'\n")
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Delete LLM Config\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X DELETE '%s/llm-configs/<config-id>'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	// ===== 3. AI Autonomous Exploration =====
+	sb.WriteString("---\n\n")
+	sb.WriteString("## 3. AI Autonomous Exploration (Generate Scripts Automatically)\n\n")
+	sb.WriteString("Use AI to browse a website, perform a task, and automatically generate a replayable script.\n\n")
+
+	sb.WriteString("### Start Exploration\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X POST '%s/ai-explore/start' \\\n", baseURL))
+	sb.WriteString("  -H 'Content-Type: application/json' \\\n")
+	sb.WriteString("  -d '{\n")
+	sb.WriteString("    \"task_desc\": \"Go to bilibili.com, search for 'AI', and get the first page of video results\",\n")
+	sb.WriteString("    \"start_url\": \"https://www.bilibili.com\",\n")
+	sb.WriteString("    \"llm_config_id\": \"my-openai\"\n")
+	sb.WriteString("  }'\n")
+	sb.WriteString("```\n")
+	sb.WriteString("**Response:** Returns a session `id` for tracking.\n\n")
+
+	sb.WriteString("### Stream Exploration Events (SSE)\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -N '%s/ai-explore/<session-id>/stream'\n", baseURL))
+	sb.WriteString("```\n")
+	sb.WriteString("Returns real-time Server-Sent Events: `thinking`, `tool_call`, `progress`, `error`, `script_ready`, `done`.\n\n")
+
+	sb.WriteString("### Stop Exploration\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X POST '%s/ai-explore/<session-id>/stop'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Get Generated Script\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET '%s/ai-explore/<session-id>/script'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Save Generated Script\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X POST '%s/ai-explore/<session-id>/save'\n", baseURL))
+	sb.WriteString("```\n")
+	sb.WriteString("Saves the generated script to the local script library for future replay.\n\n")
+
+	// ===== 4. Script Management =====
+	sb.WriteString("---\n\n")
+	sb.WriteString("## 4. Script Management\n\n")
+
+	sb.WriteString("### List All Scripts\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET '%s/scripts'\n", baseURL))
+	sb.WriteString("```\n")
+	sb.WriteString("Returns all local scripts with their `id`, `name`, `description`, `actions`, `tags`, `group`, etc.\n\n")
+
+	sb.WriteString("### Get Script Details\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET '%s/scripts/<script-id>'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Get Script Schema / Summary\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET '%s/scripts/summary'\n", baseURL))
+	sb.WriteString("```\n")
+	sb.WriteString("Returns a concise summary of all scripts, including names, descriptions, input parameters (variables), and action counts. Useful for programmatic discovery.\n\n")
+
+	sb.WriteString("### Create a New Script\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X POST '%s/scripts' \\\n", baseURL))
+	sb.WriteString("  -H 'Content-Type: application/json' \\\n")
+	sb.WriteString("  -d '{\n")
+	sb.WriteString("    \"name\": \"Search Bilibili\",\n")
+	sb.WriteString("    \"description\": \"Search for a keyword on Bilibili\",\n")
+	sb.WriteString("    \"url\": \"https://www.bilibili.com\",\n")
+	sb.WriteString("    \"actions\": [\n")
+	sb.WriteString("      {\"type\": \"navigate\", \"url\": \"https://www.bilibili.com\"},\n")
+	sb.WriteString("      {\"type\": \"click\", \"identifier\": \".nav-search-input\"},\n")
+	sb.WriteString("      {\"type\": \"type\", \"identifier\": \".nav-search-input\", \"value\": \"${keyword}\"},\n")
+	sb.WriteString("      {\"type\": \"press_key\", \"key\": \"Enter\"},\n")
+	sb.WriteString("      {\"type\": \"wait\", \"timeout\": 3}\n")
+	sb.WriteString("    ]\n")
+	sb.WriteString("  }'\n")
+	sb.WriteString("```\n")
+	sb.WriteString("**Variables:** Use `${variable_name}` syntax in action values. These become input parameters when the script is executed.\n\n")
+
+	sb.WriteString("### Update a Script\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X PUT '%s/scripts/<script-id>' \\\n", baseURL))
+	sb.WriteString("  -H 'Content-Type: application/json' \\\n")
+	sb.WriteString("  -d '{\"name\": \"Updated Name\", \"description\": \"Updated description\"}'\n")
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Delete a Script\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X DELETE '%s/scripts/<script-id>'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	// ===== 5. Execute Scripts =====
+	sb.WriteString("---\n\n")
+	sb.WriteString("## 5. Execute Scripts\n\n")
+
+	sb.WriteString("### Run a Script by ID\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X POST '%s/scripts/<script-id>/play' \\\n", baseURL))
+	sb.WriteString("  -H 'Content-Type: application/json' \\\n")
+	sb.WriteString("  -d '{\n")
+	sb.WriteString("    \"variables\": {\n")
+	sb.WriteString("      \"keyword\": \"deepseek\"\n")
+	sb.WriteString("    }\n")
+	sb.WriteString("  }'\n")
+	sb.WriteString("```\n")
+	sb.WriteString("**Variables:** Pass values for `${variable_name}` placeholders defined in the script actions.\n\n")
+
+	sb.WriteString("### Get Play Result (Extracted Data)\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET '%s/scripts/play/result'\n", baseURL))
+	sb.WriteString("```\n")
+	sb.WriteString("Returns data extracted during the last script execution (e.g., scraped content from `execute_js` actions).\n\n")
+
+	sb.WriteString("### List Script Execution History\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET '%s/script-executions?page=1&page_size=20'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	// ===== 6. Script Marketplace (Remote Scripts) =====
+	sb.WriteString("---\n\n")
+	sb.WriteString("## 6. Script Marketplace (Remote Scripts)\n\n")
+	sb.WriteString("*Note: The remote script marketplace feature is under development. The following APIs may not be available yet.*\n\n")
+	sb.WriteString("### Browse Marketplace\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("# TODO: curl -X GET '%s/marketplace/scripts?category=search&page=1'\n", baseURL))
+	sb.WriteString("```\n\n")
+	sb.WriteString("### Install Script from Marketplace\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("# TODO: curl -X POST '%s/marketplace/scripts/<remote-id>/install'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	// ===== 7. MCP Protocol =====
+	sb.WriteString("---\n\n")
+	sb.WriteString("## 7. MCP (Model Context Protocol) Integration\n\n")
+	sb.WriteString("BrowserWing exposes an MCP-compatible endpoint for AI agent integrations.\n\n")
+
+	sb.WriteString("### MCP SSE Endpoint\n")
+	sb.WriteString("```\n")
+	sb.WriteString(fmt.Sprintf("SSE:     %s/mcp/sse\n", baseURL))
+	sb.WriteString(fmt.Sprintf("Message: %s/mcp/sse_message\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Check MCP Status\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET '%s/mcp/status'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### List MCP Commands\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET '%s/mcp/commands'\n", baseURL))
+	sb.WriteString("```\n")
+	sb.WriteString("Shows all registered MCP tools (browser tools + script-based custom commands).\n\n")
+
+	// ===== 8. Prompt Management =====
+	sb.WriteString("---\n\n")
+	sb.WriteString("## 8. Prompt Management\n\n")
+	sb.WriteString("System prompts control AI behavior. Users can customize them.\n\n")
+
+	sb.WriteString("### List All Prompts\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET '%s/prompts'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Get a Specific Prompt\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET '%s/prompts/<prompt-id>'\n", baseURL))
+	sb.WriteString("```\n")
+	sb.WriteString("**System prompt IDs:** `system-extractor`, `system-formfiller`, `system-aiagent`, `system-get-mcp-info`, `system-ai-explorer`\n\n")
+
+	sb.WriteString("### Update a Prompt\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X PUT '%s/prompts/<prompt-id>' \\\n", baseURL))
+	sb.WriteString("  -H 'Content-Type: application/json' \\\n")
+	sb.WriteString("  -d '{\"content\": \"Your custom prompt content here...\"}'\n")
+	sb.WriteString("```\n\n")
+
+	// ===== 9. Browser Management =====
+	sb.WriteString("---\n\n")
+	sb.WriteString("## 9. Browser Instance Management\n\n")
+
+	sb.WriteString("### List Browser Instances\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET '%s/browser/instances'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Start a Browser Instance\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X POST '%s/browser/instances/<id>/start'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Stop a Browser Instance\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X POST '%s/browser/instances/<id>/stop'\n", baseURL))
+	sb.WriteString("```\n\n")
+
+	// ===== 10. Troubleshooting =====
+	sb.WriteString("---\n\n")
+	sb.WriteString("## 10. Troubleshooting\n\n")
+	sb.WriteString("When something goes wrong, follow these steps to diagnose issues.\n\n")
+
+	sb.WriteString("### Check Service Health\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString(fmt.Sprintf("curl -X GET 'http://%s/health'\n", host))
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### View Logs\n")
+	sb.WriteString("BrowserWing logs are stored in the path configured in `config.toml` under `[log] file`.\n")
+	sb.WriteString("Default location: `./log/browserwing.log`\n\n")
+	sb.WriteString("```bash\n")
+	sb.WriteString("# View last 100 lines of logs\n")
+	sb.WriteString("tail -n 100 ./log/browserwing.log\n\n")
+	sb.WriteString("# Follow logs in real-time\n")
+	sb.WriteString("tail -f ./log/browserwing.log\n\n")
+	sb.WriteString("# Search for errors\n")
+	sb.WriteString("grep -i 'error\\|fail\\|panic' ./log/browserwing.log | tail -20\n")
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("### Common Issues\n\n")
+
+	sb.WriteString("**1. Browser won't start**\n")
+	sb.WriteString("- Check if Google Chrome is installed: `google-chrome --version`\n")
+	sb.WriteString("- On Linux, ensure `--no-sandbox` flag or run as non-root\n")
+	sb.WriteString("- Check for lingering Chrome lock files in user data dir (SingletonLock, lockfile)\n")
+	sb.WriteString("- If using remote Chrome, verify the `control_url` in `config.toml`\n")
+	sb.WriteString("- Try killing existing Chrome processes: `pkill -f chrome`\n\n")
+
+	sb.WriteString("**2. AI features not working**\n")
+	sb.WriteString("- Ensure LLM config is set up and active: `GET /api/v1/llm-configs`\n")
+	sb.WriteString("- Test the LLM connection: `POST /api/v1/llm-configs/test`\n")
+	sb.WriteString("- Check API key validity and model availability\n")
+	sb.WriteString("- Check logs for LLM-related errors\n\n")
+
+	sb.WriteString("**3. Script execution fails**\n")
+	sb.WriteString("- Verify the script exists: `GET /api/v1/scripts/<id>`\n")
+	sb.WriteString("- Check if the browser is running: `GET /api/v1/browser/instances`\n")
+	sb.WriteString("- Review execution history: `GET /api/v1/script-executions`\n")
+	sb.WriteString("- Ensure all required `${variables}` are provided in the play request\n")
+	sb.WriteString("- Target website may have changed — try re-recording or updating the script\n\n")
+
+	sb.WriteString("**4. Page elements not found**\n")
+	sb.WriteString("- Use `GET /api/v1/executor/snapshot` to see current page elements\n")
+	sb.WriteString("- Elements may have dynamic selectors — prefer RefIDs from snapshot\n")
+	sb.WriteString("- Page may not have finished loading — use wait actions\n\n")
+
+	sb.WriteString("**5. Port conflicts**\n")
+	sb.WriteString("- BrowserWing default port: 8080 (configurable in `config.toml` under `[server] port`)\n")
+	sb.WriteString("- Chrome debugging port: 9222 (or as configured in `control_url`)\n")
+	sb.WriteString("- Check for port usage: `lsof -i :<port>` or `netstat -tlnp | grep <port>`\n\n")
+
+	// ===== Quick Start Workflow =====
+	sb.WriteString("---\n\n")
+	sb.WriteString("## Quick Start Workflow\n\n")
+	sb.WriteString("Here's how to get up and running:\n\n")
+	sb.WriteString("```\n")
+	sb.WriteString("1. Install Chrome (see Section 1)\n")
+	sb.WriteString("2. Start BrowserWing: ./browserwing --port 8080\n")
+	sb.WriteString("3. Add an LLM config (see Section 2)\n")
+	sb.WriteString("4. Choose your approach:\n")
+	sb.WriteString("   a) AI Exploration: POST /ai-explore/start with a task description\n")
+	sb.WriteString("   b) Manual Creation: POST /scripts with actions array\n")
+	sb.WriteString("   c) Web UI: Open http://<host>:8080 in browser to use the visual editor\n")
+	sb.WriteString("5. Execute scripts: POST /scripts/<id>/play\n")
+	sb.WriteString("6. View results: GET /scripts/play/result\n")
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("## API Quick Reference\n\n")
+	sb.WriteString("| Category | Method | Endpoint | Description |\n")
+	sb.WriteString("|----------|--------|----------|-------------|\n")
+	sb.WriteString("| Health | GET | `/health` | Check service status |\n")
+	sb.WriteString(fmt.Sprintf("| LLM | GET | `%s/llm-configs` | List LLM configurations |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| LLM | POST | `%s/llm-configs` | Add LLM configuration |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| LLM | POST | `%s/llm-configs/test` | Test LLM connection |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Explore | POST | `%s/ai-explore/start` | Start AI exploration |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Explore | GET | `%s/ai-explore/:id/stream` | Stream exploration events |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Explore | POST | `%s/ai-explore/:id/stop` | Stop exploration |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Explore | POST | `%s/ai-explore/:id/save` | Save generated script |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Scripts | GET | `%s/scripts` | List all scripts |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Scripts | GET | `%s/scripts/:id` | Get script details |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Scripts | POST | `%s/scripts` | Create new script |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Scripts | PUT | `%s/scripts/:id` | Update script |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Scripts | DELETE | `%s/scripts/:id` | Delete script |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Scripts | GET | `%s/scripts/summary` | Get scripts schema/summary |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Execute | POST | `%s/scripts/:id/play` | Execute a script |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Execute | GET | `%s/scripts/play/result` | Get execution result data |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Execute | GET | `%s/script-executions` | List execution history |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Prompts | GET | `%s/prompts` | List all prompts |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Prompts | PUT | `%s/prompts/:id` | Update prompt |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| Browser | GET | `%s/browser/instances` | List browser instances |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| MCP | GET | `%s/mcp/status` | MCP server status |\n", baseURL))
+	sb.WriteString(fmt.Sprintf("| MCP | GET | `%s/mcp/commands` | List MCP commands |\n", baseURL))
+	sb.WriteString("| Executor | GET | `/api/v1/executor/help` | Executor API help |\n")
+	sb.WriteString("| Executor | GET | `/api/v1/executor/snapshot` | Page accessibility snapshot |\n")
+	sb.WriteString("| Skill | GET | `/api/v1/executor/export/skill` | Export Executor skill |\n")
+	sb.WriteString(fmt.Sprintf("| Skill | GET | `%s/admin/export/skill` | Export this Admin skill |\n", baseURL))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
