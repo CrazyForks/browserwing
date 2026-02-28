@@ -342,7 +342,74 @@ curl -X POST 'http://localhost:8080/api/v1/browser/instances/<id>/stop'
 
 ---
 
-## 10. Troubleshooting
+## 10. Cookie Management
+
+Manage browser cookies — view saved cookies, import cookies (e.g., for authenticated sessions), and delete cookies.
+
+### View Saved Cookies
+```bash
+curl -X GET 'http://localhost:8080/api/v1/cookies/browser'
+```
+Returns all cookies saved under the `browser` store ID (the default store). Replace `browser` with a custom store ID if needed.
+
+### Save Current Browser Cookies
+```bash
+curl -X POST 'http://localhost:8080/api/v1/browser/cookies/save'
+```
+Saves all cookies from the current browser session to the database. Requires the browser to be running.
+
+### Import Cookies
+```bash
+curl -X POST 'http://localhost:8080/api/v1/browser/cookies/import' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "url": "https://example.com",
+    "cookies": [
+      {
+        "name": "session_id",
+        "value": "abc123",
+        "domain": ".example.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "Lax",
+        "expires": 1735689600
+      }
+    ]
+  }'
+```
+**Fields:** `name` and `value` are required. `domain`, `path`, `secure`, `httpOnly`, `sameSite`, `expires` are optional (`path` defaults to `/`).
+
+### Delete a Single Cookie
+```bash
+curl -X POST 'http://localhost:8080/api/v1/browser/cookies/delete' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "id": "browser",
+    "name": "session_id",
+    "domain": ".example.com",
+    "path": "/"
+  }'
+```
+Deletes a specific cookie identified by `name` + `domain` + `path` from the given cookie store.
+
+### Batch Delete Cookies
+```bash
+curl -X POST 'http://localhost:8080/api/v1/browser/cookies/batch/delete' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "id": "browser",
+    "cookies": [
+      {"name": "session_id", "domain": ".example.com", "path": "/"},
+      {"name": "tracking", "domain": ".example.com", "path": "/"}
+    ]
+  }'
+```
+Deletes multiple cookies at once. Each cookie is identified by `name` + `domain` + `path`.
+
+---
+
+## 11. Troubleshooting
 
 When something goes wrong, follow these steps to diagnose issues.
 
@@ -441,6 +508,11 @@ Here's how to get up and running:
 | Prompts | GET | `/api/v1/prompts` | List all prompts |
 | Prompts | PUT | `/api/v1/prompts/:id` | Update prompt |
 | Browser | GET | `/api/v1/browser/instances` | List browser instances |
+| Cookies | GET | `/api/v1/cookies/:id` | View saved cookies |
+| Cookies | POST | `/api/v1/browser/cookies/save` | Save current browser cookies |
+| Cookies | POST | `/api/v1/browser/cookies/import` | Import cookies |
+| Cookies | POST | `/api/v1/browser/cookies/delete` | Delete a single cookie |
+| Cookies | POST | `/api/v1/browser/cookies/batch/delete` | Batch delete cookies |
 | MCP | GET | `/api/v1/mcp/status` | MCP server status |
 | MCP | GET | `/api/v1/mcp/commands` | List MCP commands |
 | Executor | GET | `/api/v1/executor/help` | Executor API help |
