@@ -276,6 +276,40 @@ func (p *Player) updateAIControlStatus(ctx context.Context, page *rod.Page, curr
 	}
 }
 
+// disableIndicatorInteraction 在执行操作前临时禁用指示器面板的鼠标事件，避免遮挡目标元素
+func (p *Player) disableIndicatorInteraction(ctx context.Context, page *rod.Page) {
+	if page == nil {
+		return
+	}
+	_, err := page.Eval(`() => {
+		const panel = document.getElementById('browserwing-ai-panel');
+		if (panel) {
+			panel.style.pointerEvents = 'none';
+		}
+		return true;
+	}`)
+	if err != nil {
+		logger.Warn(ctx, "Failed to disable indicator interaction: %v", err)
+	}
+}
+
+// enableIndicatorInteraction 在操作执行完成后恢复指示器面板的鼠标事件
+func (p *Player) enableIndicatorInteraction(ctx context.Context, page *rod.Page) {
+	if page == nil {
+		return
+	}
+	_, err := page.Eval(`() => {
+		const panel = document.getElementById('browserwing-ai-panel');
+		if (panel) {
+			panel.style.pointerEvents = 'auto';
+		}
+		return true;
+	}`)
+	if err != nil {
+		logger.Warn(ctx, "Failed to enable indicator interaction: %v", err)
+	}
+}
+
 // markStepCompleted 标记步骤为已完成
 func (p *Player) markStepCompleted(ctx context.Context, page *rod.Page, stepIndex int, success bool) {
 	if page == nil {
@@ -1011,14 +1045,21 @@ func (p *Player) PlayScript(ctx context.Context, page *rod.Page, script *models.
 				action.Condition.Variable, action.Condition.Operator, action.Condition.Value)
 		}
 
+		// 执行操作前临时禁用指示器面板的鼠标事件，避免遮挡目标元素导致点击失败
+		p.disableIndicatorInteraction(ctx, page)
+
 		if err := p.executeAction(ctx, page, action); err != nil {
 			logger.Warn(ctx, "Action execution failed (continuing with subsequent steps): %v", err)
 			p.failCount++
+			// 恢复指示器交互
+			p.enableIndicatorInteraction(ctx, page)
 			// 标记步骤为失败
 			p.markStepCompleted(ctx, page, i+1, false)
 			// 不要中断，继续执行下一步
 		} else {
 			p.successCount++
+			// 恢复指示器交互
+			p.enableIndicatorInteraction(ctx, page)
 			// 标记步骤为成功
 			p.markStepCompleted(ctx, page, i+1, true)
 
